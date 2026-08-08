@@ -29,7 +29,20 @@ look correct and fail.
 **The restore inside Docker needs the PAT as a BuildKit secret**, id `github_packages_token`, because
 `nuget.config` expands `%GITHUB_PACKAGES_TOKEN%` from the environment. Never switch it to an `ARG` or a
 `COPY` — both leave the token in the image history. CI reads it from the repo secret
-`GITHUB_PACKAGES_TOKEN`; the built-in `GITHUB_TOKEN` cannot reach a package owned by StockScreener.
+**`NUGET_PACKAGES_TOKEN`** — named that because Actions reserves the `GITHUB_` prefix and will not
+create a secret using it, so `secrets.GITHUB_PACKAGES_TOKEN` expands to `""`, buildx mounts nothing,
+and the build dies on NuGet's `Parameter 'password'` as if the token were bad rather than absent. Only
+the GitHub-side name differs; the env var `nuget.config` expands is still `GITHUB_PACKAGES_TOKEN`. The
+built-in `GITHUB_TOKEN` cannot reach a package owned by StockScreener.
+
+**The web healthcheck must use `127.0.0.1`, never `localhost`.** busybox wget resolves `localhost` to
+`::1` and will not fall back to IPv4; nginx is bound IPv4-only because the image's
+`10-listen-on-ipv6-by-default.sh` patches only the config it ships and skips ours the moment it
+differs (the container log says so on every boot). The result is a container that is permanently
+`unhealthy` while serving every request perfectly — and Traefik appears to withhold the router for
+it, so the site 404s with correct labels, correct network, and correct env. Nothing points at the
+healthcheck. The api healthcheck is immune only because that image installs real curl, which does
+fall back to IPv4.
 
 **`GIT_SHA` comes from the image, never from compose.** Both images take it as a build arg and expose
 it — the API reads the ENV at `/api/version`, the web image bakes it into `/usr/share/nginx/html/version.txt`

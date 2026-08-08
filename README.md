@@ -120,12 +120,7 @@ run writes to disk. `DOCUMENTS_FOLDER` / `DOCUMENTS_FOLDER_LOCAL` set the root f
 
 ## Deploying
 
-Pushing a `vX.Y.Z` tag builds and pushes two images to GHCR:
-
-| Image | From | Serves |
-|---|---|---|
-| `ghcr.io/stephenweaver/fantasytools-api` | `api/Dockerfile` | ASP.NET on :8080, `/health` for probes |
-| `ghcr.io/stephenweaver/fantasytools-web` | `web/Dockerfile` | nginx on :8080 — static `dist` plus an `/api` proxy |
+**Push a tag. That is the whole deploy.** Nothing else is run by hand once the stack is up.
 
 ```powershell
 git tag v1.0.0        # -> :v1.0.0 and :latest
@@ -133,13 +128,37 @@ git tag v1.1.0-beta.1 # -> :v1.1.0-beta.1 and :beta-latest, leaves :latest alone
 git push --tags
 ```
 
+The tag builds and pushes two images to GHCR:
+
+| Image | From | Serves |
+|---|---|---|
+| `ghcr.io/stephenweaver/fantasytools-api` | `api/Dockerfile` | ASP.NET on :8080, `/health` for probes |
+| `ghcr.io/stephenweaver/fantasytools-web` | `web/Dockerfile` | nginx on :8080 — static `dist` plus an `/api` proxy |
+
+Watchtower on the VPS then picks them up on its own. It polls every 60 seconds, so a release is live
+roughly a minute after the build finishes — no SSH, no `docker compose pull`, no restart.
+
+- Watchtower itself lives in the **StockScreener** stack, not this one, and runs with
+  `WATCHTOWER_LABEL_ENABLE=true` — it only touches containers that opt in. Both services here carry
+  `com.centurylinklabs.watchtower.enable=true`; drop that label and the service silently stops
+  updating while everything else keeps working.
+- It re-resolves **the tag each container was started with**, not the newest tag in the registry. So
+  `FF_IMAGE_TAG` decides what a host follows: `latest` tracks stable releases, `alpha-latest` /
+  `beta-latest` track pre-releases, and an exact `v1.2.0` pins the host and never moves.
+- That is why a pre-release leaves `:latest` alone — cutting `v1.1.0-beta.1` cannot pull a build onto
+  a host tracking `latest`, only onto one tracking `beta-latest`.
+- Rolling restart is on, and `WATCHTOWER_CLEANUP=true` removes the superseded image.
+
+`docker compose up -d` is only for the initial bring-up, or when the compose file or `.env.prod`
+itself changes — those are host-side and no image tag carries them.
+
 ### Which build is running
 
 The workflow passes `--build-arg GIT_SHA=${{ github.sha }}` to both images and each exposes its own:
 
 ```bash
-curl https://fantasytool.stephenweaver.dev/version      # nginx, from /version.txt baked into the image
-curl https://fantasytool.stephenweaver.dev/api/version  # the API, {"gitSha":"..."}
+curl https://fantasytools.stephenweaver.dev/version      # nginx, from /version.txt baked into the image
+curl https://fantasytools.stephenweaver.dev/api/version  # the API, {"gitSha":"..."}
 ```
 
 Ask both. `latest` and `beta-latest` are reassigned on every release, so the tag a container was
@@ -163,7 +182,8 @@ mounted as a BuildKit secret, never an `ARG`, so it stays out of the image histo
 ### Hosting
 
 `docker-compose-prod.yml` joins the existing external `traefik-public` network, so the Traefik already
-running for StockScreener routes it and nothing in that stack changes:
+running for StockScreener routes it and nothing in that stack changes. Run this once to bring the
+stack up — after that, tags deploy themselves:
 
 ```bash
 cp .env.prod.example .env.prod   # fill it in
@@ -172,8 +192,8 @@ docker compose -f docker-compose-prod.yml --env-file .env.prod up -d
 
 | Host | Goes to |
 |---|---|
-| `fantasytool.stephenweaver.dev` | nginx — the app, and `/api/*` proxied to the api container |
-| `api.fantasytool.stephenweaver.dev` | the API directly |
+| `fantasytools.stephenweaver.dev` | nginx — the app, and `/api/*` proxied to the api container |
+| `fantasytools-api.stephenweaver.dev` | the API directly |
 
 Both must resolve to whatever fronts Traefik's `web` entrypoint (`:4322`). The browser only ever talks
 to the first one: nginx proxies `/api` in prod exactly like Vite does in dev, so `web/src/lib/api.ts`

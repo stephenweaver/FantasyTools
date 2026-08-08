@@ -72,7 +72,13 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      # 127.0.0.1, NOT localhost. busybox wget resolves localhost to ::1 and does not fall back to
+      # IPv4, and nginx here is bound to IPv4 only -- the image's 10-listen-on-ipv6-by-default.sh
+      # adds the [::] listener only to the config it ships, and skips ours because it differs. So
+      # `localhost` is a guaranteed connection-refused and the container never leaves unhealthy,
+      # while nginx is serving normally the entire time. The api healthcheck is immune because it
+      # uses real curl, which does fall back.
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 3
