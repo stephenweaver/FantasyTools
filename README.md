@@ -148,8 +148,12 @@ half-finished deploy leaves them on different commits with nothing else to show 
 is no `GIT_SHA`, so the API answers `unknown` and the nginx route only exists in the built image.
 
 `workflow_dispatch` builds both without pushing, which is how you check a Dockerfile before cutting a
-tag. The repo needs one secret, **`GITHUB_PACKAGES_TOKEN`** — a classic PAT with `read:packages`, the
-same one restore uses locally. The built-in `GITHUB_TOKEN` cannot stand in: `StephenWeaver.Common` is
+tag. The repo needs one secret, **`NUGET_PACKAGES_TOKEN`** — a classic PAT with `read:packages`, the
+same one restore uses locally. It is deliberately *not* called `GITHUB_PACKAGES_TOKEN` to match the
+env var: Actions reserves the `GITHUB_` prefix and refuses to create a secret using it, and
+`${{ secrets.GITHUB_PACKAGES_TOKEN }}` would then expand to an empty string and mount nothing. The
+name only changes on the GitHub side — the env var restore reads is still `GITHUB_PACKAGES_TOKEN`.
+The built-in `GITHUB_TOKEN` cannot stand in either: `StephenWeaver.Common` is
 published from the StockScreener repo, and that token only reaches packages owned by this one. It is
 mounted as a BuildKit secret, never an `ARG`, so it stays out of the image history.
 

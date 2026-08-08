@@ -91,7 +91,13 @@ jobs:
           # A classic PAT with read:packages, added as a repo secret. The built-in GITHUB_TOKEN
           # cannot be used here -- StephenWeaver.Common is published from the StockScreener repo,
           # and that token only reaches packages belonging to this one.
+          #
+          # The repo secret is NUGET_PACKAGES_TOKEN, not GITHUB_PACKAGES_TOKEN: Actions reserves the
+          # GITHUB_ prefix and refuses to create a secret using it, so `secrets.GITHUB_PACKAGES_TOKEN`
+          # silently expands to "" and this action then mounts nothing at all. Only the name on this
+          # line is free to change -- the secret id below and the env var it becomes inside the
+          # container are what nuget.config expands, and must stay GITHUB_PACKAGES_TOKEN.
           secrets: |
-            github_packages_token=${{ secrets.GITHUB_PACKAGES_TOKEN }}
+            github_packages_token=${{ secrets.NUGET_PACKAGES_TOKEN }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
