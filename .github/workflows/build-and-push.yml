@@ -1,0 +1,97 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'                # Regular releases (v1.0.0)
+      - 'v[0-9]+.[0-9]+.[0-9]+-alpha.[0-9]+'   # Alpha releases
+      - 'v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+'    # Beta releases
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'      # Release candidates
+  # Builds both images without pushing, to catch a broken Dockerfile before you cut a tag.
+  workflow_dispatch:
+
+jobs:
+  validate-tag:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tag format
+        run: |
+          TAG=${{ github.ref_name }}
+          if ! [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]; then
+            echo "Error: Invalid tag format. Must be vX.Y.Z or vX.Y.Z-(alpha|beta|rc).N"
+            exit 1
+          fi
+          echo "Valid tag format: $TAG"
+
+  build:
+    needs: validate-tag
+    if: always() && needs.validate-tag.result != 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: fantasytools-api
+            dockerfile: api/Dockerfile
+          - image: fantasytools-web
+            dockerfile: web/Dockerfile
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          REPO="ghcr.io/$OWNER/${{ matrix.image }}"
+
+          # Not a tag: build only, so the name never leaves this runner.
+          if [[ "${{ github.ref_type }}" != "tag" ]]; then
+            echo "tags=$REPO:ci" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          TAG=${{ github.ref_name }}
+
+          if [[ "$TAG" == *-* ]]; then
+            # Pre-release: alpha/beta/rc gets its own moving tag and leaves `latest` alone,
+            # so a staging deploy tracking alpha-latest can never pull a build into prod.
+            PRE_RELEASE=${TAG#*-}
+            PRE_RELEASE=${PRE_RELEASE%%.*}
+            echo "tags=$REPO:$TAG,$REPO:$PRE_RELEASE-latest" >> $GITHUB_OUTPUT
+          else
+            echo "tags=$REPO:$TAG,$REPO:latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          # Repo root for both images: the API restore needs the root nuget.config.
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.ref_type == 'tag' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          # A classic PAT with read:packages, added as a repo secret. The built-in GITHUB_TOKEN
+          # cannot be used here -- StephenWeaver.Common is published from the StockScreener repo,
+          # and that token only reaches packages belonging to this one.
+          secrets: |
+            github_packages_token=${{ secrets.GITHUB_PACKAGES_TOKEN }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

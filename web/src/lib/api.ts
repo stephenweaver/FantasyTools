@@ -1,0 +1,52 @@
+const TOKEN_KEY = 'fantasytools.token'
+
+export type User = {
+  userId: string
+  email: string
+  name: string
+  emailVerified: boolean
+}
+
+export type AuthResponse = {
+  token: string
+  user: User
+}
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message)
+  }
+}
+
+export const getToken = () => localStorage.getItem(TOKEN_KEY)
+export const setToken = (token: string) => localStorage.setItem(TOKEN_KEY, token)
+export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
+
+/**
+ * Calls the API with the stored bearer token attached.
+ * Throws an ApiError carrying the server's message and status on any non-2xx response --
+ * callers distinguish 401 (bad credentials) from 403 (unverified email).
+ */
+export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = getToken()
+
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init.headers,
+    },
+  })
+
+  const body = await response.text()
+
+  if (!response.ok) {
+    throw new ApiError(body || `Request failed (${response.status})`, response.status)
+  }
+
+  return (body ? JSON.parse(body) : null) as T
+}

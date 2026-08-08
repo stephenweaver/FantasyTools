@@ -1,0 +1,28 @@
+# Both images build from the repo root, so this is the context for each of them.
+
+.git
+.github
+.vs
+.vscode
+
+## .NET
+**/bin
+**/obj
+
+## Node
+**/node_modules
+**/dist
+**/.vite
+**/test-results
+**/playwright-report
+**/tsconfig.tsbuildinfo
+
+## Secrets -- prod config is injected as environment, never baked into an image
+.env
+.env.*
+!.env.example
+!.env.prod.example
+
+## Docs and compose files change nothing about a build, but do bust its cache
+*.md
+docker-compose*.yml

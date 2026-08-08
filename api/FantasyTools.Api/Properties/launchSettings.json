@@ -1,0 +1,25 @@
+{
+  "profiles": {
+    "FantasyTools.Api": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:5080",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+
+    "e2e": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:5080",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "TURNSTILE_ENABLED_LOCAL": "false",
+        "MAIL_TRANSPORT_LOCAL": "outbox"
+      }
+    }
+  }
+}

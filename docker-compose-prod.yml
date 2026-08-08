@@ -1,0 +1,91 @@
+# FantasyTools production stack.
+#
+#   docker compose -f docker-compose-prod.yml --env-file .env.prod up -d
+#
+# Runs as its own compose project and joins the existing external `traefik-public` network, so the
+# Traefik already running for StockScreener routes it with no edits to that stack. Router names are
+# prefixed `fantasytools-` because that Traefik instance is shared -- a duplicate router name there
+# would silently take over the other app's traffic.
+#
+# Every variable on the host is FF_-prefixed. The mapping to the plain names the app reads happens
+# right here, which is the only place that knows the prefix exists -- nothing in the API or the
+# image is aware of it.
+
+# Pinned rather than inherited from the directory name. The StockScreener stack deploys as project
+# `stephen` (from /home/stephen) and already owns containers called stephen-api-N -- landing in that
+# project would collide with them by name.
+name: fantasytools
+
+services:
+  api:
+    image: ghcr.io/stephenweaver/fantasytools-api:${FF_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+
+      - JWT_SECRET=${FF_JWT_SECRET}
+      # Where the emailed verification links point -- the browser-facing host, not the API one.
+      - APP_URL=https://${FF_WEB_HOST}
+
+      - FILE_SERVICE=${FF_FILE_SERVICE}
+      - DOCUMENTS_FOLDER=${FF_DOCUMENTS_FOLDER}
+      - R2_CONNECTION_STRING=${FF_R2_CONNECTION_STRING}
+      - R2_ACCESS_KEY=${FF_R2_ACCESS_KEY}
+      - R2_SECRET_KEY=${FF_R2_SECRET_KEY}
+      - R2_BUCKET=${FF_R2_BUCKET}
+
+      # TURNSTILE_ENABLED is deliberately not mapped. Only the literal "false" disables the captcha,
+      # so leaving it unset is the safe default and there is no way to typo it off in prod.
+      - TURNSTILE_SITE_KEY=${FF_TURNSTILE_SITE_KEY}
+      - TURNSTILE_SECRET_KEY=${FF_TURNSTILE_SECRET_KEY}
+
+      - MAILERSEND_API_KEY=${FF_MAILERSEND_API_KEY}
+      - MAIL_FROM_EMAIL=${FF_MAIL_FROM_EMAIL}
+      - MAIL_FROM_NAME=${FF_MAIL_FROM_NAME}
+      - MAIL_TRANSPORT=${FF_MAIL_TRANSPORT:-mailersend}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.fantasytools-api.rule=Host(`${FF_API_HOST}`)"
+      - "traefik.http.routers.fantasytools-api.entrypoints=web"
+      - "traefik.http.services.fantasytools-api.loadbalancer.server.port=8080"
+      - "com.centurylinklabs.watchtower.enable=true"
+    networks:
+      traefik-public:
+        aliases:
+          # Compose aliases every service by its own name, so plain `api` on this shared network
+          # answers for the StockScreener stack's api replicas as well as this one -- Docker DNS
+          # returns every match and round-robins between them. nginx has to ask for a name only
+          # this stack answers to. Renaming this alias means editing web/nginx.conf to match.
+          - fantasytools-api
+
+  web:
+    image: ghcr.io/stephenweaver/fantasytools-web:${FF_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.fantasytools-web.rule=Host(`${FF_WEB_HOST}`)"
+      - "traefik.http.routers.fantasytools-web.entrypoints=web"
+      - "traefik.http.services.fantasytools-web.loadbalancer.server.port=8080"
+      - "com.centurylinklabs.watchtower.enable=true"
+    networks:
+      - traefik-public
+
+networks:
+  traefik-public:
+    external: true

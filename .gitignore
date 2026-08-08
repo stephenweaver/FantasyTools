@@ -1,0 +1,20 @@
+## .NET
+bin/
+obj/
+.vs/
+*.user
+
+## Node
+node_modules/
+dist/
+.vite/
+test-results/
+playwright-report/
+
+## Local mail outbox
+Outbox/
+
+## Secrets
+.env
+.env.local
+.env.prod
