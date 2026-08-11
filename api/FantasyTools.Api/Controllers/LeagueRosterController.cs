@@ -1,0 +1,37 @@
+using FantasyTools.Api.Models;
+using FantasyTools.Api.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+
+namespace FantasyTools.Api.Controllers;
+
+[ApiController]
+[Authorize]
+[Route("api/leagues/{leagueId}/rosters")]
+public class LeagueRosterController(ILeagueRosterService service) : ControllerBase
+{
+    [HttpGet]
+    public async Task<ActionResult> Get(string leagueId) => await Run(() => service.GetOrCreate(leagueId, UserId));
+
+    [HttpPut("{rosterId:int}")]
+    public async Task<ActionResult> Assign(string leagueId, int rosterId, [FromBody] SaveRosterAssignmentRequest request)
+    {
+        request.RosterId = rosterId;
+        return await Run(() => service.Assign(leagueId, UserId, request));
+    }
+
+    [HttpDelete("{rosterId:int}")]
+    public async Task<ActionResult> Remove(string leagueId, int rosterId) => await Run(async () => { await service.Remove(leagueId, UserId, rosterId); return new { removed = true }; });
+
+    private string UserId => User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    private async Task<ActionResult> Run<T>(Func<Task<T>> action)
+    {
+        try { return Ok(await action()); }
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
+        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, ex.Message); }
+        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
+    }
+}
