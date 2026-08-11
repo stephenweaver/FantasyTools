@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
+import { apiFetch, getToken } from './lib/api'
 
 type Category = 'ATTACK' | 'BOOST' | 'DEFENSE'
 type Card = { id: number; name: string; category: Category; amount: number; target: string; copy: string; icon: string }
 type Team = { id: number; manager: string; name: string; initials: string; record: string; score: number; chaos: number; hand: number; accent: string }
 type CardStatus = 'IDEA' | 'ARTWORK READY' | 'NEEDS REVIEW' | 'ACTIVE' | 'ARCHIVED'
-type UploadedCard = Card & { artwork: string; rarity: string; copies: number; active: boolean; status: CardStatus; notes: string; updatedBy: string; updatedAt: string; effectType: string; special: boolean; sourcePlayer?: string; sourcePlayerId?: string; destinationSlot?: string; multiplier?: number }
+type UploadedCard = Card & { serverId?: string; artwork: string; rarity: string; copies: number; active: boolean; status: CardStatus; notes: string; updatedBy: string; updatedAt: string; effectType: string; special: boolean; sourcePlayer?: string; sourcePlayerId?: string; destinationSlot?: string; multiplier?: number }
+
+const CHAOS_LEAGUE_ID = '1301750882777456640'
+const fromServerCard = (card: any): UploadedCard => ({ id: Number(String(card.id).replace(/\D/g,'').slice(0,12)) || Date.now(), serverId: card.id, name: card.name, category: card.category, amount: card.amount, target: card.target, copy: card.officialDescription, icon: card.category === 'ATTACK' ? '⚡' : card.category === 'BOOST' ? '🔥' : '🛡', artwork: card.artworkDataUrl || '', rarity: card.rarity, copies: card.copies, active: card.status === 'ACTIVE', status: card.status, notes: card.commissionerNotes || '', updatedBy: card.updatedByName || 'Commissioner', updatedAt: card.updatedAt, effectType: card.effectType, special: card.isSpecial, sourcePlayer: card.sourcePlayer, sourcePlayerId: card.sourcePlayerId, destinationSlot: card.destinationSlot, multiplier: card.multiplier })
+const toServerCard = (card: UploadedCard, submitForReview: boolean) => ({ name: card.name, category: card.category, rarity: card.rarity, isSpecial: card.special, artworkDataUrl: card.artwork, officialDescription: card.copy, commissionerNotes: card.notes, target: card.target, effectType: card.effectType, amount: card.amount, copies: card.copies, sourcePlayer: card.sourcePlayer, sourcePlayerId: card.sourcePlayerId, destinationSlot: card.destinationSlot, multiplier: card.multiplier, submitForReview })
 
 const cards: Card[] = [
   { id: 1, name: 'Crushing Blow', category: 'ATTACK', amount: -50, target: 'Opponent QB slot', copy: 'Cut the opposing starting QB slot score by 50%.', icon: '⚡' },
@@ -48,7 +53,7 @@ function TeamBadge({ team, small }: { team: Team; small?: boolean }) {
   return <div className={`team-badge ${small ? 'small' : ''}`} style={{ '--team': team.accent } as React.CSSProperties}>{team.initials}</div>
 }
 
-function CardCreator({ initialCard, onSave, onCancel }: { initialCard: UploadedCard | null; onSave: (card: UploadedCard) => void; onCancel: () => void }) {
+function CardCreator({ initialCard, onSave, onCancel }: { initialCard: UploadedCard | null; onSave: (card: UploadedCard) => Promise<void> | void; onCancel: () => void }) {
   const [name, setName] = useState(initialCard?.name || '')
   const [category, setCategory] = useState<Category>(initialCard?.category || 'ATTACK')
   const [description, setDescription] = useState(initialCard?.copy || '')
@@ -75,11 +80,13 @@ function CardCreator({ initialCard, onSave, onCancel }: { initialCard: UploadedC
     reader.readAsDataURL(file)
   }
 
-  const save = (submitForReview: boolean) => {
+  const save = async (submitForReview: boolean) => {
     if (!name.trim() && !artwork) { setError('Add a working name or artwork before saving this draft.'); return }
     if (submitForReview && (!name.trim() || !description.trim() || !artwork)) { setError('A name, artwork, and complete game-rules summary are required before review.'); return }
     const status: CardStatus = submitForReview ? 'NEEDS REVIEW' : artwork ? 'ARTWORK READY' : 'IDEA'
-    onSave({ id: initialCard?.id || Date.now(), name: name.trim() || 'Untitled card idea', category, amount, target, copy: description.trim(), icon: category === 'ATTACK' ? '⚡' : category === 'BOOST' ? '🔥' : '🛡', artwork, rarity, copies, active: false, status, notes: notes.trim(), updatedBy: 'Matthew', updatedAt: new Date().toISOString(), effectType, special, ...(effectType === 'Referenced player replaces slot' ? { sourcePlayer, sourcePlayerId, destinationSlot, multiplier } : {}) })
+    try {
+      await onSave({ id: initialCard?.id || Date.now(), serverId: initialCard?.serverId, name: name.trim() || 'Untitled card idea', category, amount, target, copy: description.trim(), icon: category === 'ATTACK' ? '⚡' : category === 'BOOST' ? '🔥' : '🛡', artwork, rarity, copies, active: false, status, notes: notes.trim(), updatedBy: 'Matthew', updatedAt: new Date().toISOString(), effectType, special, ...(effectType === 'Referenced player replaces slot' ? { sourcePlayer, sourcePlayerId, destinationSlot, multiplier } : {}) })
+    } catch (ex) { setError((ex as Error).message) }
   }
 
   return <main className="admin-page"><div className="admin-heading"><div><div className="eyebrow">SHARED COMMISSIONER WORKSPACE</div><h1>{initialCard ? 'Edit Card Draft' : 'Card Creator'}</h1><p>Save artwork and ideas now. Finish the engine rules together before approving the card for the deck.</p></div><button className="secondary" onClick={onCancel}>VIEW CARD LIBRARY →</button></div>
@@ -177,13 +184,33 @@ export default function App() {
     }).catch(() => setSleeperStatus('fallback'))
   }, [])
 
-  const saveUploadedCard = (card: UploadedCard) => {
-    const next = uploadedCards.some(existing=>existing.id===card.id) ? uploadedCards.map(existing=>existing.id===card.id?card:existing) : [...uploadedCards, card]
+  useEffect(() => {
+    if (!getToken()) return
+    apiFetch<{cards: any[]}>(`/api/leagues/${CHAOS_LEAGUE_ID}/cards`)
+      .then(workspace => {
+        const shared = workspace.cards.map(fromServerCard)
+        setUploadedCards(shared)
+        localStorage.setItem('chaos-uploaded-cards',JSON.stringify(shared))
+      })
+      .catch(() => { /* The first saved draft creates the workspace. */ })
+  }, [])
+
+  const saveUploadedCard = async (card: UploadedCard) => {
+    let saved = card
+    if (getToken()) {
+      const path = card.serverId ? `/api/leagues/${CHAOS_LEAGUE_ID}/cards/${card.serverId}` : `/api/leagues/${CHAOS_LEAGUE_ID}/cards`
+      const response = await apiFetch<any>(path,{method:card.serverId?'PUT':'POST',body:JSON.stringify(toServerCard(card,card.status==='NEEDS REVIEW'))})
+      saved = fromServerCard(response)
+    }
+    const next = uploadedCards.some(existing=>existing.id===card.id) ? uploadedCards.map(existing=>existing.id===card.id?saved:existing) : [...uploadedCards, saved]
     try { localStorage.setItem('chaos-uploaded-cards', JSON.stringify(next)); setUploadedCards(next); setScreen('library'); setActiveNav('Card Library') }
     catch { alert('The image is too large for browser-local storage. Try a smaller image.') }
   }
-  const updateCardStatus = (id: number, status: CardStatus) => {
-    const next = uploadedCards.map(card=>card.id===id?{...card,status,active:status==='ACTIVE',updatedBy:'Matthew',updatedAt:new Date().toISOString()}:card)
+  const updateCardStatus = async (id: number, status: CardStatus) => {
+    const current = uploadedCards.find(card=>card.id===id)
+    let saved = current ? {...current,status,active:status==='ACTIVE',updatedBy:'Matthew',updatedAt:new Date().toISOString()} : null
+    if (getToken() && current?.serverId) saved = fromServerCard(await apiFetch<any>(`/api/leagues/${CHAOS_LEAGUE_ID}/cards/${current.serverId}/status`,{method:'POST',body:JSON.stringify({status})}))
+    const next = uploadedCards.map(card=>card.id===id&&saved?saved:card)
     localStorage.setItem('chaos-uploaded-cards',JSON.stringify(next)); setUploadedCards(next)
   }
   const deleteUploadedCard = (id: number) => {

@@ -34,6 +34,7 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<ICardPlayRules, CardPlayRules>();
         services.AddSingleton<ICardLifecycleRules, CardLifecycleRules>();
         services.AddSingleton<ICommissionerAuthorization, CommissionerAuthorization>();
+        services.AddSingleton<ICardWorkspaceService, CardWorkspaceService>();
 
         services.AddHttpClient<ITurnstileHttpClient, TurnstileHttpClient>();
         services.AddSingleton<ITurnstileService, TurnstileService>();
