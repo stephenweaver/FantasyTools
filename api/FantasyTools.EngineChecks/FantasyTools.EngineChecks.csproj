@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\FantasyTools.Api\Game\Domain\GameModels.cs" Link="GameModels.cs" />
+    <Compile Include="..\FantasyTools.Api\Game\Engine\ChaosScoringEngine.cs" Link="ChaosScoringEngine.cs" />
+    <Compile Include="..\FantasyTools.Api\Game\Rules\CardPlayRules.cs" Link="CardPlayRules.cs" />
+    <Compile Include="..\FantasyTools.Api\Game\Rules\CardLifecycleRules.cs" Link="CardLifecycleRules.cs" />
+    <Compile Include="..\FantasyTools.Api\Game\Domain\CommissionerModels.cs" Link="CommissionerModels.cs" />
+    <Compile Include="..\FantasyTools.Api\Game\Rules\CommissionerAuthorization.cs" Link="CommissionerAuthorization.cs" />
+  </ItemGroup>
+</Project>

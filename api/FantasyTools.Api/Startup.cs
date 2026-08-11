@@ -1,5 +1,7 @@
 using FantasyTools.Api.Documents;
 using FantasyTools.Api.HttpClients;
+using FantasyTools.Api.Game.Engine;
+using FantasyTools.Api.Game.Rules;
 using FantasyTools.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -28,6 +30,10 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<IPasswordHasher<UserDocument>, PasswordHasher<UserDocument>>();
         services.AddSingleton<IAuthService, AuthService>();
         services.AddSingleton<IEmailService, EmailService>();
+        services.AddSingleton<IChaosScoringEngine, ChaosScoringEngine>();
+        services.AddSingleton<ICardPlayRules, CardPlayRules>();
+        services.AddSingleton<ICardLifecycleRules, CardLifecycleRules>();
+        services.AddSingleton<ICommissionerAuthorization, CommissionerAuthorization>();
 
         services.AddHttpClient<ITurnstileHttpClient, TurnstileHttpClient>();
         services.AddSingleton<ITurnstileService, TurnstileService>();
