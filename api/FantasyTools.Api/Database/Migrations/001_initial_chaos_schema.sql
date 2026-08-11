@@ -51,7 +51,7 @@ create table member_permissions (
     league_id uuid not null references chaos_leagues(id),
     user_id text not null,
     permission text not null check (permission in (
-        'manage_cards','manage_deck','invite_managers','assign_rosters','manage_deadlines',
+        'create_card_drafts','edit_card_rules','approve_cards','manage_deck','invite_managers','assign_rosters','manage_deadlines',
         'lock_weeks','correct_scores','view_private_hands','manage_co_commissioners'
     )),
     granted_by_user_id text not null,
@@ -70,11 +70,13 @@ create unique index ux_active_member_permission
 create table card_definitions (
     id uuid primary key,
     name text not null,
+    workflow_status text not null default 'idea' check (workflow_status in ('idea','artwork_ready','needs_review','active','archived')),
     category text not null check (category in ('attack','boost','defense')),
     rarity text not null default 'common',
     is_special boolean not null default false,
-    official_description text not null,
-    artwork_key text not null,
+    official_description text not null default '',
+    artwork_key text,
+    commissioner_notes text not null default '',
     target_type text not null check (target_type in ('starting_slot','position_group','team','specific_player','dynamic')),
     effect_type text not null check (effect_type in ('flat_points','percentage','block_attack','reduce_attack','referenced_player_replaces_slot','custom')),
     effect_amount numeric(12,4) not null default 0,
@@ -82,11 +84,15 @@ create table card_definitions (
     destination_slot text,
     multiplier numeric(12,4),
     custom_handler text,
-    is_active boolean not null default true,
+    is_active boolean not null default false,
+    reviewed_by_user_id text,
+    reviewed_at timestamptz,
     created_by_user_id text not null,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
-    check (effect_type <> 'referenced_player_replaces_slot' or
+    check (workflow_status not in ('needs_review','active') or artwork_key is not null),
+    check (workflow_status <> 'active' or (is_active = true and reviewed_by_user_id is not null and reviewed_at is not null)),
+    check (workflow_status <> 'active' or effect_type <> 'referenced_player_replaces_slot' or
         (referenced_player_id is not null and destination_slot is not null and multiplier is not null)),
     check (effect_type <> 'custom' or custom_handler is not null)
 );

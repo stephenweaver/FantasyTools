@@ -13,6 +13,7 @@ public enum EffectType
     Custom
 }
 public enum CardCopyState { Deck, Hand, SecretSelection, Locked, Revealed, Played, WeeklyDiscard }
+public enum CardWorkflowStatus { Idea, ArtworkReady, NeedsReview, Active, Archived }
 public enum WeekStatus { Setup, SelectionOpen, Locked, Revealed, Live, Finalized }
 
 public sealed record CardDefinition(
@@ -24,6 +25,8 @@ public sealed record CardDefinition(
     string Rarity,
     bool IsSpecial,
     bool IsActive,
+    CardWorkflowStatus WorkflowStatus,
+    string CommissionerNotes,
     TargetType TargetType,
     EffectType EffectType,
     decimal Amount,

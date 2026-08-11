@@ -61,14 +61,14 @@ AssertEqual(1, draws.Single(draw => draw.Category == CardCategory.Defense).Quant
 
 var authorization = new CommissionerAuthorization();
 var primary = new LeagueAccess(teamId, "primary", true, new HashSet<CommissionerPermission>());
-var cardManager = new LeagueAccess(teamId, "card-manager", false, new HashSet<CommissionerPermission> { CommissionerPermission.ManageCards });
+var cardManager = new LeagueAccess(teamId, "card-manager", false, new HashSet<CommissionerPermission> { CommissionerPermission.CreateCardDrafts });
 var delegatedManager = new LeagueAccess(teamId, "delegated-manager", false, new HashSet<CommissionerPermission> { CommissionerPermission.ManageCoCommissioners });
 var ordinaryPlayer = new LeagueAccess(teamId, "player", false, new HashSet<CommissionerPermission>());
-AssertTrue(authorization.Authorize(cardManager, CommissionerPermission.ManageCards).Allowed, "card manager can add cards");
+AssertTrue(authorization.Authorize(cardManager, CommissionerPermission.CreateCardDrafts).Allowed, "card manager can add card drafts");
 AssertEqual("permission_denied", authorization.Authorize(cardManager, CommissionerPermission.CorrectScores).Code, "card manager cannot correct scores");
 AssertTrue(authorization.Authorize(primary, CommissionerPermission.CorrectScores).Allowed, "primary commissioner has all permissions");
 AssertEqual("primary_protected", authorization.AuthorizePermissionChange(primary, primary,
-    new(teamId, "primary", "primary", CommissionerPermission.ManageCards, false)).Code, "primary commissioner is protected");
+    new(teamId, "primary", "primary", CommissionerPermission.CreateCardDrafts, false)).Code, "primary commissioner is protected");
 AssertEqual("cannot_delegate_admin", authorization.AuthorizePermissionChange(delegatedManager, ordinaryPlayer,
     new(teamId, "delegated-manager", "player", CommissionerPermission.ManageCoCommissioners, true)).Code, "co-commissioner cannot delegate permission management");
 

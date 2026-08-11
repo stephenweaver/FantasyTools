@@ -2,7 +2,9 @@ namespace FantasyTools.Api.Game.Domain;
 
 public enum CommissionerPermission
 {
-    ManageCards,
+    CreateCardDrafts,
+    EditCardRules,
+    ApproveCards,
     ManageDeck,
     InviteManagers,
     AssignRosters,
