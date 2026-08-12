@@ -27,6 +27,9 @@ public class LeagueRosterController(ILeagueRosterService service) : ControllerBa
     [HttpPost("claims")]
     public async Task<ActionResult> Claim(string leagueId, [FromBody] CreateRosterClaimRequest request) => await Run(() => service.Claim(leagueId, UserId, User.FindFirstValue(ClaimTypes.Email), User.FindFirstValue(ClaimTypes.Name), request));
 
+    [HttpGet("claims/mine")]
+    public async Task<ActionResult> MyClaim(string leagueId) => await Run(() => service.GetMyClaim(leagueId, UserId));
+
     [HttpPost("claims/{claimId}")]
     public async Task<ActionResult> Review(string leagueId, string claimId, [FromQuery] bool approve) => await Run(() => service.ReviewClaim(leagueId, UserId, claimId, approve));
 
