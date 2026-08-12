@@ -6,6 +6,7 @@ import { cards, ChaosCard, type Card, type Category } from './lib/cards'
 type Team = { id: number; manager: string; name: string; initials: string; record: string; score: number; chaos: number; hand: number; accent: string; sleeperUserId?: string }
 type LineupPlayer = { name: string; position: string; nflTeam: string; opponent: string; game: string; projection: number; points: number; stats: string; status?: string }
 type RosterAssignment = { rosterId: number; sleeperUserId: string; sleeperManagerName: string; sleeperTeamName: string; fantasyToolsUserId?: string; fantasyToolsEmail: string; fantasyToolsName?: string }
+type RosterWorkspace = { primaryCommissionerUserId: string; assignments: RosterAssignment[] }
 type CardStatus = 'IDEA' | 'ARTWORK READY' | 'NEEDS REVIEW' | 'ACTIVE' | 'ARCHIVED'
 type UploadedCard = Card & { serverId?: string; artwork: string; rarity: string; copies: number; active: boolean; status: CardStatus; notes: string; updatedBy: string; updatedAt: string; effectType: string; special: boolean; sourcePlayer?: string; sourcePlayerId?: string; destinationSlot?: string; multiplier?: number }
 
@@ -181,19 +182,29 @@ const commissionerPermissions = [
 ] as const
 
 function CommissionerAccess({ teams, grants, onChange }: { teams: Team[]; grants: Record<number,string[]>; onChange: (next: Record<number,string[]>) => void }) {
-  const [selectedTeam, setSelectedTeam] = useState(teams[1]?.id || teams[0].id)
+  const { user } = useAuth()
+  const [workspace, setWorkspace] = useState<RosterWorkspace | null | undefined>(undefined)
+  useEffect(() => { apiFetch<RosterWorkspace>(`/api/leagues/${CHAOS_LEAGUE_ID}/rosters`).then(setWorkspace).catch(()=>setWorkspace(null)) }, [])
+  const primaryRoster = workspace?.assignments.find(item=>item.fantasyToolsUserId===workspace.primaryCommissionerUserId)
+  const primaryTeam = primaryRoster ? teams.find(team=>team.id===primaryRoster.rosterId) : undefined
+  const viewerIsPrimary = Boolean(user?.userId && user.userId===workspace?.primaryCommissionerUserId)
+  const [selectedTeam, setSelectedTeam] = useState(teams[0].id)
   const selected = teams.find(team=>team.id===selectedTeam) || teams[0]
+  const selectedIsPrimary = selected.id === primaryTeam?.id
   const selectedGrants = grants[selected.id] || []
   const toggle = (permission: string) => {
     if (permission === 'manage_co_commissioners') return
     const current = grants[selected.id] || []
     onChange({...grants,[selected.id]:current.includes(permission)?current.filter(item=>item!==permission):[...current,permission]})
   }
-  return <main className="access-page"><div className="admin-heading"><div><div className="eyebrow">PRIMARY COMMISSIONER ONLY</div><h1>Commissioner Access</h1><p>Give trusted managers only the tools they need. Permission changes are permanently logged.</p></div><div className="primary-owner"><TeamBadge team={teams[0]} small/><span>PRIMARY COMMISSIONER<b>{teams[0].manager}</b></span></div></div>
-    <div className="access-layout"><aside className="manager-list"><h3>LEAGUE MANAGERS</h3>{teams.map((team,index)=><button className={selected.id===team.id?'selected':''} onClick={()=>setSelectedTeam(team.id)} key={team.id}><TeamBadge team={team} small/><span><b>{team.manager}</b><small>{team.name}</small></span>{index===0?<em>OWNER</em>:(grants[team.id]?.length||0)>0?<em className="co">CO-COMMISSIONER</em>:null}</button>)}</aside>
-      <section className="permission-panel"><div className="permission-person"><TeamBadge team={selected}/><div><span>EDITING ACCESS FOR</span><h2>{selected.manager}</h2><p>{selected.name}</p></div>{selected.id===teams[0].id&&<b>PRIMARY COMMISSIONER · FULL ACCESS</b>}</div>
-        <div className="permission-list">{commissionerPermissions.map(([key,title,description])=>{const primary=selected.id===teams[0].id;const primaryOnly=key==='manage_co_commissioners';const checked=primary||selectedGrants.includes(key);return <label className={`${checked?'granted':''} ${primaryOnly&&!primary?'locked-permission':''}`} key={key}><input type="checkbox" checked={checked} disabled={primary||primaryOnly} onChange={()=>toggle(key)}/><span><b>{title}</b><small>{description}</small></span>{primaryOnly&&!primary&&<em>PRIMARY ONLY</em>}</label>})}</div>
-        {selected.id!==teams[0].id&&<div className="access-summary"><b>{selectedGrants.length?`${selected.manager} IS A CO-COMMISSIONER`:`${selected.manager} IS A REGULAR PLAYER`}</b><span>{selectedGrants.length?`${selectedGrants.length} permission${selectedGrants.length===1?'':'s'} granted`:'No administrative access'}</span></div>}
+  if (workspace === undefined) return <main className="access-page"><div className="setup-message">Checking commissioner access…</div></main>
+  if (!viewerIsPrimary) return <main className="access-page"><div className="setup-message">Only the person who created this Chaos Cards league can manage commissioner access.</div></main>
+  return <main className="access-page"><div className="admin-heading"><div><div className="eyebrow">PRIMARY COMMISSIONER ONLY</div><h1>Commissioner Access</h1><p>Give trusted managers only the tools they need. Permission changes are permanently logged.</p></div>{primaryTeam?<div className="primary-owner"><TeamBadge team={primaryTeam} small/><span>PRIMARY COMMISSIONER<b>{primaryTeam.manager}</b></span></div>:<div className="primary-owner unlinked-owner"><span>PRIMARY COMMISSIONER<b>ROSTER NOT CONNECTED</b></span></div>}</div>
+    {!primaryTeam&&<div className="setup-message">You are the Chaos Cards league creator, but your account is not connected to a Sleeper roster yet. No Sleeper manager is labeled as owner until you connect yours.</div>}
+    <div className="access-layout"><aside className="manager-list"><h3>LEAGUE MANAGERS</h3>{teams.map(team=><button className={selected.id===team.id?'selected':''} onClick={()=>setSelectedTeam(team.id)} key={team.id}><TeamBadge team={team} small/><span><b>{team.manager}</b><small>{team.name}</small></span>{primaryTeam?.id===team.id?<em>OWNER</em>:(grants[team.id]?.length||0)>0?<em className="co">CO-COMMISSIONER</em>:null}</button>)}</aside>
+      <section className="permission-panel"><div className="permission-person"><TeamBadge team={selected}/><div><span>EDITING ACCESS FOR</span><h2>{selected.manager}</h2><p>{selected.name}</p></div>{selectedIsPrimary&&<b>PRIMARY COMMISSIONER · FULL ACCESS</b>}</div>
+        <div className="permission-list">{commissionerPermissions.map(([key,title,description])=>{const primary=selectedIsPrimary;const primaryOnly=key==='manage_co_commissioners';const checked=primary||selectedGrants.includes(key);return <label className={`${checked?'granted':''} ${primaryOnly&&!primary?'locked-permission':''}`} key={key}><input type="checkbox" checked={checked} disabled={primary||primaryOnly} onChange={()=>toggle(key)}/><span><b>{title}</b><small>{description}</small></span>{primaryOnly&&!primary&&<em>PRIMARY ONLY</em>}</label>})}</div>
+        {!selectedIsPrimary&&<div className="access-summary"><b>{selectedGrants.length?`${selected.manager} IS A CO-COMMISSIONER`:`${selected.manager} IS A REGULAR PLAYER`}</b><span>{selectedGrants.length?`${selectedGrants.length} permission${selectedGrants.length===1?'':'s'} granted`:'No administrative access'}</span></div>}
       </section></div>
   </main>
 }
@@ -219,8 +230,12 @@ export default function App() {
   const [editingCard, setEditingCard] = useState<UploadedCard | null>(null)
   const [permissionGrants, setPermissionGrants] = useState<Record<number,string[]>>(() => { try { return JSON.parse(localStorage.getItem('chaos-permission-grants') || '{}') } catch { return {} } })
   const [rosterAssignments, setRosterAssignments] = useState<RosterAssignment[]>(() => { try { return JSON.parse(localStorage.getItem('chaos-roster-assignments') || '[]') } catch { return [] } })
+  const [primaryCommissionerUserId, setPrimaryCommissionerUserId] = useState('')
   const [activeMatchup, setActiveMatchup] = useState(0)
   const home = teamData[activeMatchup * 2] || teamData[0], away = teamData[activeMatchup * 2 + 1] || teamData[1]
+  const primaryRoster = rosterAssignments.find(item => item.fantasyToolsUserId === primaryCommissionerUserId)
+  const primaryTeam = primaryRoster ? teamData.find(team => team.id === primaryRoster.rosterId) : undefined
+  const viewerIsPrimary = Boolean(account?.userId && account.userId === primaryCommissionerUserId)
 
   useEffect(() => {
     const leagueId = '1301750882777456640'
@@ -250,8 +265,8 @@ export default function App() {
         localStorage.setItem('chaos-uploaded-cards',JSON.stringify(shared))
       })
       .catch(() => { /* The first saved draft creates the workspace. */ })
-    apiFetch<{assignments:RosterAssignment[]}>(`/api/leagues/${CHAOS_LEAGUE_ID}/rosters`)
-      .then(workspace => { setRosterAssignments(workspace.assignments); localStorage.setItem('chaos-roster-assignments',JSON.stringify(workspace.assignments)) })
+    apiFetch<RosterWorkspace>(`/api/leagues/${CHAOS_LEAGUE_ID}/rosters`)
+      .then(workspace => { setPrimaryCommissionerUserId(workspace.primaryCommissionerUserId); setRosterAssignments(workspace.assignments); localStorage.setItem('chaos-roster-assignments',JSON.stringify(workspace.assignments)) })
       .catch(() => { /* The commissioner starts setup from the roster screen. */ })
   }, [])
 
