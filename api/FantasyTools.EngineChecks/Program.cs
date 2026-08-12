@@ -44,6 +44,45 @@ var bromance = engine.Calculate(new(teamId, starters, new Dictionary<string, dec
 }));
 AssertEqual(78m, bromance.ChaosScore, "referenced-player replacement");
 
+// Double or Nothing targets one starter: five catches doubles the full score,
+// while four catches zeroes it out.
+var receiverTarget = new CardTarget(TargetType.SpecificPlayer, teamId, null, null, "wr-1", null);
+var doubleWin = engine.Calculate(new TeamScoreInput(teamId, starters, new Dictionary<string, decimal>(), new[]
+{
+    new ActiveEffect(Guid.NewGuid(), "Double or Nothing", CardCategory.Boost, EffectType.Custom,
+        receiverTarget, 100m, CustomHandler: "double-or-nothing")
+}) { PlayerStats = new Dictionary<string, PlayerWeekStats> { ["wr-1"] = new(Receptions: 5) } });
+AssertEqual(70m, doubleWin.ChaosScore, "double or nothing win");
+
+var doubleLoss = engine.Calculate(new TeamScoreInput(teamId, starters, new Dictionary<string, decimal>(), new[]
+{
+    new ActiveEffect(Guid.NewGuid(), "Double or Nothing", CardCategory.Boost, EffectType.Custom,
+        receiverTarget, 100m, CustomHandler: "double-or-nothing")
+}) { PlayerStats = new Dictionary<string, PlayerWeekStats> { ["wr-1"] = new(Receptions: 4) } });
+AssertEqual(50m, doubleLoss.ChaosScore, "double or nothing loss");
+
+var challengedId = Guid.NewGuid();
+var challenge = engine.Calculate(new(teamId, starters, new Dictionary<string, decimal>(), new ActiveEffect[]
+{
+    new(challengedId, "Two Deep", CardCategory.Attack, EffectType.Percentage, qbTarget, -25m),
+    new(Guid.NewGuid(), "Challenge Flag", CardCategory.Defense, EffectType.Custom,
+        new(TargetType.Dynamic, teamId, null, null, null, $"cancel:{challengedId}"), 0m, CustomHandler: "challenge-flag")
+}));
+AssertEqual(60m, challenge.ChaosScore, "challenge flag cancels selected card");
+
+var complete = engine.Calculate(new TeamScoreInput(teamId, starters, new Dictionary<string, decimal>(), new[]
+{
+    new ActiveEffect(Guid.NewGuid(), "Complete", CardCategory.Boost, EffectType.Custom, qbTarget, 2m, CustomHandler: "complete")
+}) { PlayerStats = new Dictionary<string, PlayerWeekStats> { ["qb-1"] = new(Completions: 20) } });
+AssertEqual(100m, complete.ChaosScore, "complete reception stat handler");
+
+var capHit = engine.Calculate(new(teamId, starters, new Dictionary<string, decimal>(), new[]
+{
+    new ActiveEffect(Guid.NewGuid(), "Cap Hit", CardCategory.Attack, EffectType.Custom,
+        new(TargetType.Team, teamId, null, null, null, null), 15m, CustomHandler: "cap-hit")
+}));
+AssertEqual(40m, capHit.ChaosScore, "cap hit limits every starter");
+
 var rules = new CardPlayRules();
 var request = new PlayRequest(weekId, matchupId, teamId, opponentId, cardCopyId, CardTiming.PreWeek, qbTarget, DateTimeOffset.UtcNow);
 var validState = new WeekPlayState(WeekStatus.SelectionOpen, DateTimeOffset.UtcNow.AddHours(1), 0, 0, true, CardCopyState.Hand, true, true);
@@ -86,3 +125,4 @@ static void AssertTrue(bool actual, string name)
     if (!actual) throw new Exception($"{name}: expected true");
     Console.WriteLine($"PASS {name}");
 }
+
