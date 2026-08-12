@@ -7,6 +7,21 @@ public class LeagueRosterDocument : BaseDocument
     public string LeagueId { get; set; }
     public string PrimaryCommissionerUserId { get; set; }
     public List<LeagueRosterAssignmentDocument> Assignments { get; set; } = [];
+    public List<LeagueRosterClaimDocument> Claims { get; set; } = [];
+}
+
+public class LeagueRosterClaimDocument
+{
+    public string Id { get; set; }
+    public int RosterId { get; set; }
+    public string SleeperUserId { get; set; }
+    public string SleeperManagerName { get; set; }
+    public string SleeperTeamName { get; set; }
+    public string FantasyToolsUserId { get; set; }
+    public string FantasyToolsEmail { get; set; }
+    public string FantasyToolsName { get; set; }
+    public string Status { get; set; }
+    public DateTime RequestedAt { get; set; }
 }
 
 public class LeagueRosterAssignmentDocument
