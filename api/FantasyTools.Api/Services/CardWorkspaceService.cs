@@ -14,7 +14,69 @@ public class CardWorkspaceService(IFileService fileService) : ICardWorkspaceServ
     {
         var workspace = await Load(leagueId);
         EnsureMember(workspace, userId);
+        if (workspace.Cards.Count == 0 && workspace.PrimaryCommissionerUserId == userId)
+        {
+            ImportCardData(workspace, userId);
+            workspace.At = DateTime.UtcNow;
+            await fileService.Upsert(workspace);
+        }
         return workspace;
+    }
+
+    private static void ImportCardData(CardWorkspaceDocument workspace, string userId)
+    {
+        var now = DateTime.UtcNow;
+        var basics = new[]
+        {
+            "ATTACK|Two Deep|25|QB|3", "ATTACK|No Fly Zone|50|QB|2", "ATTACK|Air Traffic Control|100|QB|1",
+            "DEFENSE|Iron Curtain|25|RB|3", "DEFENSE|Stacked Box|50|RB|2", "DEFENSE|Stuffed|100|RB|1",
+            "DEFENSE|Lockdown|25|WR|3", "DEFENSE|Double Teamed|50|WR|2", "DEFENSE|Denial|100|WR|1",
+            "DEFENSE|Shutdown|25|TE|3", "DEFENSE|Pressure|50|TE|2", "DEFENSE|The Mike|100|TE|1",
+            "BOOST|Launched|25|QB|3", "BOOST|Air It Out|50|QB|2", "BOOST|West Coast|100|QB|1",
+            "BOOST|Stiff Arm|25|RB|3", "BOOST|Ankle Breaker|50|RB|2", "BOOST|Trucked|100|RB|1",
+            "BOOST|Crosser|25|WR|3", "BOOST|Deep Threat|50|WR|2", "BOOST|Moss'd|100|WR|1",
+            "BOOST|Possession|25|TE|3", "BOOST|Shake'n'Bake|50|TE|2", "BOOST|Gronk|100|TE|1"
+        };
+        foreach (var row in basics)
+        {
+            var p=row.Split('|');
+            var description = p[0] == "ATTACK" ? $"Reduce your opponent's starting {p[3]} points by {p[2]}%." : p[0] == "DEFENSE" ? $"Reduce an incoming attack against your {p[3]} by {p[2]}%." : $"Increase your starting {p[3]} points by {p[2]}%.";
+            var effect = p[0] == "ATTACK" ? "Percentage reduction" : p[0] == "DEFENSE" ? "Attack protection" : "Percentage boost";
+            workspace.Cards.Add(new CardDraftDocument { Id=Guid.NewGuid().ToString(), Name=p[1], Category=p[0], Rarity="Common", IsSpecial=false, ArtworkUrl="", OfficialDescription=description, CommissionerNotes="Imported from the Card Data sheet. Effect follows the indicated lineup position.", Target=p[3], EffectType=effect, Amount=decimal.Parse(p[2]), Copies=int.Parse(p[4]), Status="IDEA", CreatedByUserId=userId, UpdatedByUserId=userId, UpdatedByName="Card Data import", CreatedAt=now, UpdatedAt=now });
+        }
+
+        var specials = new[]
+        {
+            "Challenge Flag|N/A|N/A|10|Prevent an opponent's card from being played or scored.|One card per team at start of season.",
+            "Pick Six|QB/DEF|2|2|Subtract the touchdown value from the opponent QB and add it to your defense.|",
+            "Complete|QB|2|2|Add 2 points per completion.|",
+            "Incomplete|QB|3|2|Add 3 points per incompletion.|",
+            "Rough Start|Single Player|15|2|Opponent begins the week at minus 15 points.|",
+            "Double TD|Chosen Player|100|2|Double touchdown points for the chosen player.|",
+            "Double or Nothing|W/R/T|100|2|Five or more receptions doubles the player's points; four or fewer scores zero.|",
+            "Bromance|QB|100|2|Use double Patrick Mahomes's weekly points as your QB points, regardless of starter.|",
+            "Spygate|Chosen Player|0|2|Swap an opponent starter with a bench player of your choice.|Bench replacement cannot be injured.",
+            "Traded WR|Chosen Player|0|2|Select another team's WR and use that score in your starting lineup.|",
+            "Traded RB|Chosen Player|0|2|Select another team's RB and use that score in your starting lineup.|",
+            "Traded TE|Chosen Player|0|2|Select another team's TE and use that score in your starting lineup.|",
+            "FAFB|QB|100|2|Double your QB rushing-yardage points for the week.|",
+            "Sticky Hands|W/R/T|2|2|Every reception is worth 2 points.|",
+            "Beast Mode|RB|0.3|2|Every rushing yard is worth 0.3 points.|",
+            "Sacked|QB|-5|2|Every time the targeted QB is sacked, subtract 5 points.|",
+            "Shoestring Tackle|Defense|50|2|Apply a 50% effect to defense scoring.|Direction needs commissioner confirmation.",
+            "28-3|Team|40|2|If losing by 50 or more points going into Monday Night Football, add 40 points at week's end.|",
+            "Injured|Team|50|2|If a starting player is injured and does not return, add 50 points.|",
+            "Butt Fumble|Team|5|2|Add 5 points whenever a player on your team fumbles.|",
+            "Cap Hit|Team|15|2|Cap every player on the opposing team at 15 points.|",
+            "MVP|Chosen Player|0|2|Use the league's highest-scoring player's score in your roster.|Destination slot needs commissioner selection.",
+            "1v1 me bro|ALL|0|2|Both teams choose one player at the selected position; the winner receives both players' points.|"
+        };
+        foreach (var row in specials)
+        {
+            var p=row.Split('|');
+            workspace.Cards.Add(new CardDraftDocument { Id=Guid.NewGuid().ToString(), Name=p[0], Category="BOOST", Rarity="Specialty", IsSpecial=true, ArtworkUrl="", OfficialDescription=p[4], CommissionerNotes=$"Imported from the Card Data sheet. {p[5]}".Trim(), Target=p[1], EffectType="Specialty rule", Amount=decimal.Parse(p[2]), Copies=int.Parse(p[3]), Status="IDEA", CreatedByUserId=userId, UpdatedByUserId=userId, UpdatedByName="Card Data import", CreatedAt=now, UpdatedAt=now });
+        }
+        workspace.Audit.Insert(0, new CardAuditDocument { CardId="catalog-import", ActorUserId=userId, ActorName="Card Data import", Action="imported_47_idea_drafts", At=now });
     }
 
     public Task<CardDraftDocument> Create(string leagueId, string userId, string userName, SaveCardDraftRequest request) =>
