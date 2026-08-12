@@ -98,6 +98,17 @@ public class LeagueRosterService(IFileService fileService) : ILeagueRosterServic
         finally { gate.Release(); }
     }
 
+    public async Task<LeagueRosterClaimDocument> GetMyClaim(string leagueId, string userId)
+    {
+        var document = await Load(leagueId);
+        var assignment = document.Assignments.SingleOrDefault(x => x.FantasyToolsUserId == userId);
+        if (assignment != null)
+            return new LeagueRosterClaimDocument { Id="approved", RosterId=assignment.RosterId, SleeperUserId=assignment.SleeperUserId, SleeperManagerName=assignment.SleeperManagerName, SleeperTeamName=assignment.SleeperTeamName, FantasyToolsUserId=userId, FantasyToolsEmail=assignment.FantasyToolsEmail, FantasyToolsName=assignment.FantasyToolsName, Status="APPROVED", RequestedAt=assignment.AssignedAt };
+
+        return document.Claims.Where(x => x.FantasyToolsUserId == userId).OrderByDescending(x => x.RequestedAt).FirstOrDefault()
+            ?? throw new KeyNotFoundException("No roster claim has been submitted for this account.");
+    }
+
     public async Task<LeagueRosterDocument> ReviewClaim(string leagueId, string actorUserId, string claimId, bool approve)
     {
         var gate=Locks.GetOrAdd(leagueId,_=>new SemaphoreSlim(1,1)); await gate.WaitAsync();
