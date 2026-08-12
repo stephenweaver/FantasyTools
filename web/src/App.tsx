@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from './lib/api'
 import { useAuth } from './lib/auth'
 import { cards, ChaosCard, type Card, type Category } from './lib/cards'
+import { cardDataIdeas, toDraftRequest } from './lib/cardDataIdeas'
 
 type Team = { id: number; manager: string; name: string; initials: string; record: string; score: number; chaos: number; hand: number; accent: string; sleeperUserId?: string }
 type LineupPlayer = { name: string; position: string; nflTeam: string; opponent: string; game: string; projection: number; points: number; stats: string; status?: string }
@@ -275,6 +276,7 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
         setUploadedCards(shared)
         setCardPermissions(workspace.collaborators?.find(item=>item.userId===account?.userId)?.permissions || [])
         localStorage.setItem('chaos-uploaded-cards',JSON.stringify(shared))
+        if(account?.userId===league.primaryCommissionerUserId){const existing=new Set(workspace.cards.map(card=>String(card.name).toLowerCase()));const missing=cardDataIdeas.filter(card=>!existing.has(card.name.toLowerCase()));if(missing.length)Promise.all(missing.map(card=>apiFetch(`/api/leagues/${workspaceId}/cards`,{method:'POST',body:JSON.stringify(toDraftRequest(card))}))).then(()=>apiFetch<CardWorkspaceAccess>(`/api/leagues/${workspaceId}/cards`)).then(updated=>{const imported=updated.cards.map(fromServerCard);setUploadedCards(imported);localStorage.setItem('chaos-uploaded-cards',JSON.stringify(imported))}).catch(()=>{})}
       })
       .catch(() => { /* The first saved draft creates the workspace. */ })
     apiFetch<RosterWorkspace>(`/api/leagues/${workspaceId}/rosters`)
