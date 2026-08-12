@@ -80,15 +80,26 @@ But v3.3.5's docker provider cannot talk to Engine 29: it fails with a bare
 looks like the culprit. Upgrading the host's Docker means bumping Traefik first.
 
 `DOCUMENTS_FOLDER` in prod is an R2 key prefix on a Linux container. A Windows path there is taken
-literally. **`IMAGES_FOLDER` is the same kind of value** and has the same trap.
+literally.
 
-**Card artwork lives in a second R2 bucket** (`IMAGES_BUCKET`), public-read, reached by its own
+**Images live in a second R2 bucket** (`IMAGES_BUCKET`), public-read, reached by its own
 `AmazonS3Client` in `ImageStorageService`. It cannot go through `IFileService` — that is constructed
 against `R2_BUCKET` alone and only round-trips `BaseDocument` as JSON. The `R2_*` credentials are
 shared, so a new key pair has to be granted on both buckets or uploads start failing while documents
 keep working. `IMAGES_BASE_URL` is the public host bound to that bucket and is baked into every stored
 card: change the host and existing cards point at the old one, because the URL is persisted, not built
 at read time.
+
+**The folder inside that bucket is not configurable, on purpose.** Each kind of image gets a folder
+named after it, from `ImageStorageService.Categories` — which is simultaneously the allowlist the
+`POST /api/images/{category}` route validates against and the folder name. There was an `IMAGES_FOLDER`
+setting for this and it lasted one deploy: `FF_IMAGES_FOLDER=` blank in `.env.prod` meant `GetVar`
+returned `""`, a `??` default sailed past it, and every object landed at the bucket root under a key
+beginning with `/` — so stored URLs came out as `https://images.…//<guid>.webp`. `IMAGES_FOLDER` now
+survives only as the local disk root, which is why it is read solely in the non-R2 branch.
+
+Keep both halves of a key ours: the folder from the allowlist, the name a fresh GUID. That is what lets
+`Save` skip path-traversal checks and lets the static file mount serve the folder directly.
 
 **Local artwork is served by static file middleware, not a controller.** `Startup` mounts
 `IImageStorageService.LocalRoot` on the request path `/api/images`, and there is deliberately no read

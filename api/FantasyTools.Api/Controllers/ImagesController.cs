@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace FantasyTools.Api.Controllers;
 
 /// <summary>
-/// Card artwork uploads. Requires a bearer token: it is the one route that accepts arbitrary bytes.
+/// Image uploads. Requires a bearer token: it is the one route that accepts arbitrary bytes.
 /// </summary>
 /// <remarks>
 /// There is no read action to match. In R2 mode the images host serves the objects directly, and in
@@ -16,11 +16,21 @@ namespace FantasyTools.Api.Controllers;
 [Route("api/images")]
 public class ImagesController(IImageStorageService images) : ControllerBase
 {
-    [HttpPost]
+    /// <summary>
+    /// Uploads one image of the named kind. The category is the folder it lands in -- <c>cards</c> is
+    /// the only one today, and a new kind of image is a new value in
+    /// <see cref="ImageStorageService.Categories"/> rather than a change here.
+    /// </summary>
+    [HttpPost("{category}")]
     [Authorize]
     [RequestSizeLimit(ImageStorageService.MaxBytes + 1024)]
-    public async Task<ActionResult> Upload(IFormFile file)
+    public async Task<ActionResult> Upload(string category, IFormFile file)
     {
+        if (!ImageStorageService.Categories.Contains(category))
+        {
+            return NotFound($"Unknown image category '{category}'.");
+        }
+
         if (file == null || file.Length == 0)
         {
             return BadRequest("Choose an image to upload.");
@@ -49,7 +59,7 @@ public class ImagesController(IImageStorageService images) : ControllerBase
             return BadRequest("That file is not a valid PNG, JPG, or WebP image.");
         }
 
-        return Ok(new { url = await images.Save(contentType, bytes) });
+        return Ok(new { url = await images.Save(category, contentType, bytes) });
     }
 
     private static bool LooksLike(string contentType, byte[] bytes) => contentType switch

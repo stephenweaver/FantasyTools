@@ -48,8 +48,8 @@ Vite proxies `/api` to the API, so the browser stays on one origin — no CORS, 
 | POST | `/api/auth/verify` | anon | `{email,token}` → 204, or 400 for a bad/expired link |
 | POST | `/api/auth/resend-verification` | anon | `{email,turnstileToken}` → always 204 |
 | GET | `/api/auth/me` | bearer | `{userId, email, name, emailVerified}` |
-| POST | `/api/images` | **bearer** | `multipart/form-data` with a `file` field → `{url}` |
-| GET | `/api/images/…` | anon | static files off the artwork folder — local mode only, see below |
+| POST | `/api/images/{category}` | **bearer** | `multipart/form-data` with a `file` field → `{url}`; 404 for an unknown category |
+| GET | `/api/images/…` | anon | static files off the image folder — local mode only, see below |
 
 Auth is deliberately minimal: a `UserDocument` holding a `PasswordHasher<T>` (PBKDF2-SHA256) hash, and a
 7-day HS256 JWT signed with `JWT_SECRET`. No refresh tokens, no server-side sessions.
@@ -155,18 +155,22 @@ run writes to disk. `DOCUMENTS_FOLDER` / `DOCUMENTS_FOLDER_LOCAL` set the root f
 > `C:\StockWatch\Documents`, the `_LOCAL` convention was compiled out of the Release-built package, and an
 > empty `R2_CONNECTION_STRING=` crashed startup with `No RegionEndpoint or ServiceURL configured`.
 
-### Card artwork
+### Images
 
-Card images are **not** stored in the card document. `POST /api/images` takes the file, stores it, and
-returns a URL; the card keeps only that URL. Uploading requires a bearer token — it is the one write
+Card artwork is **not** stored in the card document. `POST /api/images/cards` takes the file, stores it,
+and returns a URL; the card keeps only that URL. Uploading requires a bearer token — it is the one write
 path in the app that accepts arbitrary bytes, so it is never anonymous.
 
-Artwork follows the same R2-vs-disk split as documents, driven by its own variables:
+**Each kind of image gets a folder named after it.** `cards` is the only one today; adding another is a
+new entry in `ImageStorageService.Categories`, which is both the allowlist the route validates against
+and the folder name. The folder is deliberately *not* configurable — the bucket holds nothing but
+images, so a settable root prefix bought nothing and only gave a blank value somewhere to hide.
+
+Storage follows the same R2-vs-disk split as documents:
 
 ```
-IMAGE_SERVICE=R2                                        IMAGE_SERVICE_LOCAL=local
-IMAGES_FOLDER=cards                # R2 key prefix      IMAGES_FOLDER_LOCAL=C:\FantasyTools\Images
-IMAGES_BUCKET=fantasytools-images
+IMAGE_SERVICE=R2                    IMAGE_SERVICE_LOCAL=local
+IMAGES_BUCKET=fantasytools-images   IMAGES_FOLDER_LOCAL=C:\FantasyTools\Images   # disk root, local only
 IMAGES_BASE_URL=https://images.fantasytools.stephenweaver.dev
 ```
 
@@ -178,7 +182,10 @@ are shared — only the bucket differs. It gets its own S3 client rather than go
 | Mode | Where bytes go | URL the card stores | Who serves it |
 |---|---|---|---|
 | `IMAGE_SERVICE=R2` | `IMAGES_BUCKET`, key `cards/<guid>.png` | `IMAGES_BASE_URL` + `/cards/<guid>.png` | the images host, directly |
-| anything else | `IMAGES_FOLDER` on disk | `/api/images/cards/<guid>.png` | static file middleware |
+| anything else | `IMAGES_FOLDER``/cards` on disk | `/api/images/cards/<guid>.png` | static file middleware |
+
+Neither segment of a key is caller-supplied — the folder comes from the allowlist and the name is a
+fresh GUID — so an upload can neither escape its folder nor overwrite an existing object.
 
 **Nothing reads an image back through application code.** Locally the artwork folder is handed to
 ASP.NET's static file middleware at startup, mounted on `/api/images` — so reads get ETag,

@@ -91,7 +91,7 @@ function CardCreator({ initialCard, onSave, onCancel }: { initialCard: UploadedC
     const body = new FormData()
     body.append('file', file)
     setUploading(true); setError('')
-    try { setArtwork((await apiFetch<{url:string}>('/api/images',{method:'POST',body})).url) }
+    try { setArtwork((await apiFetch<{url:string}>('/api/images/cards',{method:'POST',body})).url) }
     catch (ex) { setError((ex as Error).message) }
     finally { setUploading(false) }
   }

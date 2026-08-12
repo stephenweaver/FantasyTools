@@ -13,8 +13,8 @@ public interface IImageStorageService
     /// </summary>
     string LocalRoot { get; }
 
-    /// <summary>Stores the bytes and returns the URL a browser should use to fetch them.</summary>
-    Task<string> Save(string contentType, byte[] bytes);
+    /// <summary>Stores the bytes under the category's folder and returns the URL a browser should use.</summary>
+    Task<string> Save(string category, string contentType, byte[] bytes);
 }
 
 /// <summary>
@@ -40,13 +40,18 @@ public class ImageStorageService : IImageStorageService
 
     public const int MaxBytes = 8 * 1024 * 1024;
 
+    /// <summary>
+    /// Every kind of image gets its own folder, and the folder name is the category itself -- it is not
+    /// configurable. The bucket holds nothing but images, so a settable root prefix bought nothing and
+    /// only gave an empty value somewhere to hide (a blank one produced keys starting with a slash).
+    /// Adding a kind of image is one entry here.
+    /// </summary>
+    public static readonly HashSet<string> Categories = new(StringComparer.OrdinalIgnoreCase) { "cards" };
+
     private readonly ILogger<ImageStorageService> _logger;
     private readonly IAmazonS3 _s3Client;
     private readonly string _bucket;
     private readonly string _baseUrl;
-
-    /// <summary>The leading segment of every key. Part of the stored URL, so it must stay relative.</summary>
-    private readonly string _prefix;
 
     public ImageStorageService(ILogger<ImageStorageService> logger)
     {
@@ -54,11 +59,14 @@ public class ImageStorageService : IImageStorageService
 
         if (!string.Equals(EnvironmentHelper.GetVar("IMAGE_SERVICE"), "R2", StringComparison.OrdinalIgnoreCase))
         {
-            // IMAGES_FOLDER means the same thing DOCUMENTS_FOLDER does: a disk path locally, an object
-            // key prefix in R2. Locally it is the root that keys hang off, never part of a key itself.
-            LocalRoot = Path.GetFullPath(EnvironmentHelper.GetVar("IMAGES_FOLDER") ?? @"C:\FantasyTools\Images");
-            _prefix = "cards";
-            _logger.LogInformation("Card artwork is stored on local disk at {Folder}.", LocalRoot);
+            // IMAGES_FOLDER is the disk root the category folders hang off, and is local-only -- in R2
+            // the bucket is that root. Whitespace-check, not a null-check: an env file that declares
+            // IMAGES_FOLDER= with no value hands back "", which a ?? would sail straight past.
+            var folder = EnvironmentHelper.GetVar("IMAGES_FOLDER")?.Trim();
+
+            LocalRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(folder) ? @"C:\FantasyTools\Images" : folder);
+
+            _logger.LogInformation("Images are stored on local disk under {Folder}.", LocalRoot);
             return;
         }
 
@@ -66,7 +74,6 @@ public class ImageStorageService : IImageStorageService
         // silently land nowhere, or hand the browser a URL on a host that was never configured.
         _bucket = Require("IMAGES_BUCKET");
         _baseUrl = Require("IMAGES_BASE_URL").TrimEnd('/');
-        _prefix = (EnvironmentHelper.GetVar("IMAGES_FOLDER") ?? "cards").Trim('/');
 
         var credentials = new BasicAWSCredentials(Require("R2_ACCESS_KEY"), Require("R2_SECRET_KEY"));
 
@@ -77,16 +84,22 @@ public class ImageStorageService : IImageStorageService
             ResponseChecksumValidation = ResponseChecksumValidation.WHEN_REQUIRED
         });
 
-        _logger.LogInformation("Card artwork is stored in R2 bucket {Bucket}, served from {BaseUrl}.", _bucket, _baseUrl);
+        _logger.LogInformation("Images are stored in R2 bucket {Bucket}, served from {BaseUrl}.", _bucket, _baseUrl);
     }
 
     public string LocalRoot { get; }
 
-    public async Task<string> Save(string contentType, byte[] bytes)
+    public async Task<string> Save(string category, string contentType, byte[] bytes)
     {
-        // The name is a fresh GUID, so a key can never point anywhere but at the file just written and
-        // the URL can be cached forever. Nothing caller-supplied reaches the path.
-        var key = $"{_prefix}/{Guid.NewGuid():N}{AllowedTypes[contentType]}";
+        if (!Categories.Contains(category))
+        {
+            throw new ArgumentException($"Unknown image category '{category}'.");
+        }
+
+        // Both segments are ours: the folder comes from the allowlist above and the name is a fresh
+        // GUID. Nothing caller-supplied reaches the key, so it can neither escape the folder nor
+        // overwrite an existing object, and the URL can be cached forever.
+        var key = $"{category.ToLowerInvariant()}/{Guid.NewGuid():N}{AllowedTypes[contentType]}";
 
         if (LocalRoot != null)
         {

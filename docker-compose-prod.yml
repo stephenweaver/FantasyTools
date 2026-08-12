@@ -35,10 +35,10 @@ services:
       - R2_SECRET_KEY=${FF_R2_SECRET_KEY}
       - R2_BUCKET=${FF_R2_BUCKET}
 
-      # Card artwork goes to its own public-read bucket, reusing the R2 credentials above.
-      # IMAGES_BASE_URL is the host bound to that bucket -- uploaded URLs are built from it.
+      # Images go to their own public-read bucket, reusing the R2 credentials above. There is no folder
+      # variable: each kind of image gets a folder named after it (cards/...), fixed in the API.
+      # IMAGES_BASE_URL is the host bound to that bucket -- stored URLs are built from it.
       - IMAGE_SERVICE=${FF_IMAGE_SERVICE}
-      - IMAGES_FOLDER=${FF_IMAGES_FOLDER}
       - IMAGES_BUCKET=${FF_IMAGES_BUCKET}
       - IMAGES_BASE_URL=${FF_IMAGES_BASE_URL}
 
