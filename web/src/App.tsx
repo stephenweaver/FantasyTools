@@ -4,6 +4,7 @@ import { useAuth } from './lib/auth'
 import { cards, ChaosCard, type Card, type Category } from './lib/cards'
 
 type Team = { id: number; manager: string; name: string; initials: string; record: string; score: number; chaos: number; hand: number; accent: string; sleeperUserId?: string }
+type LineupPlayer = { name: string; position: string; nflTeam: string; opponent: string; game: string; projection: number; points: number; stats: string; status?: string }
 type RosterAssignment = { rosterId: number; sleeperUserId: string; sleeperManagerName: string; sleeperTeamName: string; fantasyToolsUserId?: string; fantasyToolsEmail: string; fantasyToolsName?: string }
 type CardStatus = 'IDEA' | 'ARTWORK READY' | 'NEEDS REVIEW' | 'ACTIVE' | 'ARCHIVED'
 type UploadedCard = Card & { serverId?: string; artwork: string; rarity: string; copies: number; active: boolean; status: CardStatus; notes: string; updatedBy: string; updatedAt: string; effectType: string; special: boolean; sourcePlayer?: string; sourcePlayerId?: string; destinationSlot?: string; multiplier?: number }
@@ -25,6 +26,27 @@ const mockTeams: Team[] = [
   { id: 10, manager: 'Morgan', name: 'Bye Week Bandits', initials: 'BB', record: '2–5', score: 101.7, chaos: 95.7, hand: 4, accent: '#38bdf8' },
 ]
 
+const playerPool: LineupPlayer[] = [
+  { name:'Joe Burrow',position:'QB',nflTeam:'CIN',opponent:'CLE',game:'SUN 1:00 PM',projection:21.55,points:24.82,stats:'286 pass yds · 2 pass TD · 18 rush yds' },
+  { name:'Christian McCaffrey',position:'RB',nflTeam:'SF',opponent:'SEA',game:'THU 8:15 PM',projection:19.59,points:17.40,stats:'82 rush yds · 5 rec · 38 rec yds' },
+  { name:'Chase Brown',position:'RB',nflTeam:'CIN',opponent:'CLE',game:'SUN 1:00 PM',projection:16.72,points:14.60,stats:'68 rush yds · 4 rec · 32 rec yds' },
+  { name:'Chris Olave',position:'WR',nflTeam:'NO',opponent:'ATL',game:'SUN 4:25 PM',projection:14.75,points:18.10,stats:'7 rec · 101 rec yds · 1 TD' },
+  { name:'Garrett Wilson',position:'WR',nflTeam:'NYJ',opponent:'BUF',game:'SUN 1:00 PM',projection:13.54,points:12.30,stats:'6 rec · 63 rec yds' },
+  { name:'Trey McBride',position:'TE',nflTeam:'ARI',opponent:'LAR',game:'SUN 4:05 PM',projection:12.10,points:15.70,stats:'8 rec · 77 rec yds' },
+  { name:'DeVonta Smith',position:'FLEX',nflTeam:'PHI',opponent:'DAL',game:'SUN 8:20 PM',projection:13.20,points:11.90,stats:'5 rec · 69 rec yds' },
+  { name:'Brandon Aubrey',position:'K',nflTeam:'DAL',opponent:'PHI',game:'SUN 8:20 PM',projection:8.80,points:10.00,stats:'2 FG · 4 XP' },
+  { name:'Jalen Hurts',position:'QB',nflTeam:'PHI',opponent:'DAL',game:'SUN 8:20 PM',projection:21.17,points:22.44,stats:'241 pass yds · 2 pass TD · 41 rush yds' },
+  { name:'Bucky Irving',position:'RB',nflTeam:'TB',opponent:'ATL',game:'SUN 1:00 PM',projection:12.18,points:16.20,stats:'91 rush yds · 3 rec · 29 rec yds' },
+  { name:'Bijan Robinson',position:'RB',nflTeam:'ATL',opponent:'TB',game:'SUN 1:00 PM',projection:18.90,points:20.70,stats:'106 rush yds · 4 rec · 34 rec yds' },
+  { name:'CeeDee Lamb',position:'WR',nflTeam:'DAL',opponent:'PHI',game:'SUN 8:20 PM',projection:17.15,points:19.80,stats:'8 rec · 108 rec yds' },
+  { name:'DJ Moore',position:'WR',nflTeam:'CHI',opponent:'MIN',game:'MON 8:15 PM',projection:12.11,points:9.60,stats:'5 rec · 46 rec yds' },
+  { name:'Sam LaPorta',position:'TE',nflTeam:'DET',opponent:'GB',game:'SUN 4:25 PM',projection:10.80,points:13.40,stats:'6 rec · 74 rec yds' },
+  { name:'James Cook',position:'FLEX',nflTeam:'BUF',opponent:'NYJ',game:'SUN 1:00 PM',projection:14.30,points:18.60,stats:'88 rush yds · 1 TD · 3 rec' },
+  { name:'Jake Elliott',position:'K',nflTeam:'PHI',opponent:'DAL',game:'SUN 8:20 PM',projection:8.10,points:9.00,stats:'2 FG · 3 XP' },
+]
+
+const lineupFor = (teamId: number, side: number) => Array.from({length:8},(_,index) => ({...playerPool[(teamId * 3 + side * 8 + index) % playerPool.length], status:index < 5 ? 'FINAL' : 'YET TO PLAY'}))
+
 const initialLog = [
   ['2:41 PM', '🔥', 'Matthew revealed END ZONE FEVER on his WR1 slot.'],
   ['1:18 PM', '🛡', 'Stephen’s LOCKDOWN reduced an incoming QB attack by 50%.'],
@@ -34,6 +56,19 @@ const initialLog = [
 
 function TeamBadge({ team, small }: { team: Team; small?: boolean }) {
   return <div className={`team-badge ${small ? 'small' : ''}`} style={{ '--team': team.accent } as React.CSSProperties}>{team.initials}</div>
+}
+
+function LineupComparison({ home, away }: { home: Team; away: Team }) {
+  const [expanded, setExpanded] = useState<number | null>(null)
+  const left = lineupFor(home.id,0), right = lineupFor(away.id,1)
+  return <section className="lineup-comparison"><div className="lineup-title"><div><span>WEEK 1 MATCHUP</span><h2>Starting Lineups</h2></div><p>Tap any player to view the stats behind their score.</p></div>
+    <div className="lineup-columns lineup-team-head"><div><TeamBadge team={home} small/><span><b>{home.name}</b><small>{home.manager}</small></span><strong>{home.score.toFixed(2)}</strong></div><i>VS</i><div><strong>{away.score.toFixed(2)}</strong><span><b>{away.name}</b><small>{away.manager}</small></span><TeamBadge team={away} small/></div></div>
+    <div className="lineup-list">{left.map((player,index) => { const opponent=right[index]; const open=expanded===index; return <button className={`lineup-row ${open?'expanded':''}`} onClick={()=>setExpanded(open?null:index)} key={`${player.name}-${index}`}>
+      <div className="lineup-player left-player"><span className="player-avatar">{player.name.split(' ').map(word=>word[0]).join('').slice(0,2)}</span><span><b>{player.name}</b><small>{player.position} · {player.nflTeam} · vs {player.opponent}</small><em>{player.game} · {player.status}</em>{open&&<p>{player.stats}</p>}</span><strong>{player.points.toFixed(2)}<small>PROJ {player.projection.toFixed(2)}</small></strong></div>
+      <i>{player.position}</i>
+      <div className="lineup-player right-player"><strong>{opponent.points.toFixed(2)}<small>PROJ {opponent.projection.toFixed(2)}</small></strong><span><b>{opponent.name}</b><small>{opponent.position} · {opponent.nflTeam} · vs {opponent.opponent}</small><em>{opponent.game} · {opponent.status}</em>{open&&<p>{opponent.stats}</p>}</span><span className="player-avatar">{opponent.name.split(' ').map(word=>word[0]).join('').slice(0,2)}</span></div>
+    </button>})}</div>
+  </section>
 }
 
 function RosterAssignments({ teams, assignments, onSave, onRemove }: { teams: Team[]; assignments: RosterAssignment[]; onSave: (team: Team, email: string) => Promise<void>; onRemove: (team: Team) => Promise<void> }) {
@@ -184,7 +219,8 @@ export default function App() {
   const [editingCard, setEditingCard] = useState<UploadedCard | null>(null)
   const [permissionGrants, setPermissionGrants] = useState<Record<number,string[]>>(() => { try { return JSON.parse(localStorage.getItem('chaos-permission-grants') || '{}') } catch { return {} } })
   const [rosterAssignments, setRosterAssignments] = useState<RosterAssignment[]>(() => { try { return JSON.parse(localStorage.getItem('chaos-roster-assignments') || '[]') } catch { return [] } })
-  const home = teamData[0], away = teamData[1]
+  const [activeMatchup, setActiveMatchup] = useState(0)
+  const home = teamData[activeMatchup * 2] || teamData[0], away = teamData[activeMatchup * 2 + 1] || teamData[1]
 
   useEffect(() => {
     const leagueId = '1301750882777456640'
@@ -318,14 +354,15 @@ export default function App() {
     {screen === 'rosters' ? <RosterAssignments teams={teamData} assignments={rosterAssignments} onSave={saveRosterAssignment} onRemove={removeRosterAssignment}/> : screen === 'permissions' ? <CommissionerAccess teams={teamData} grants={permissionGrants} onChange={updatePermissionGrants}/> : screen === 'admin' ? <CardCreator initialCard={editingCard} onSave={saveUploadedCard} onCancel={()=>{setEditingCard(null);setScreen('library');setActiveNav('Card Library')}}/> : screen === 'library' ? <SharedCardLibrary uploaded={uploadedCards} onCreate={()=>{setEditingCard(null);setScreen('admin');setActiveNav('')}} onEdit={card=>{setEditingCard(card);setScreen('admin');setActiveNav('')}} onStatus={updateCardStatus} onDelete={deleteUploadedCard}/> : screen === 'room' ? <main className="room">
       <section className="room-hero"><div><div className="eyebrow">{leagueName} · WEEK 1 DEMO</div><h1>League Room</h1><p>{sleeperStatus === 'live' ? 'REAL SLEEPER TEAMS · DEMO MATCHUPS AND SCORES' : sleeperStatus === 'loading' ? 'IMPORTING YOUR SLEEPER MANAGERS…' : 'SLEEPER IMPORT BLOCKED HERE · SHOWING DEMO NAMES'}</p></div><div className="deadline"><span>THURSDAY CARD LOCK</span><strong>{revealed ? 'CARDS REVEALED' : '02 : 14 : 36'}</strong><button onClick={toggleReveal}>{revealed ? 'RESET TO PRE-WEEK' : 'COMMISSIONER: LOCK & REVEAL'}</button></div></section>
       <div className="ticker"><b>LIVE CHAOS</b><span>⚡ Stephen played CRUSHING BLOW</span><span>•</span><span>Jordan’s score jumps +7.5</span><span>•</span><span>🛡 LOCKDOWN activated</span></div>
-      <section className="matchup-grid">{[0,2,4,6,8].map((i, index) => { const a=teamData[i], b=teamData[i+1]; if (!a || !b) return null; return <article className={`matchup ${index===0?'featured':''}`} key={a.id} onClick={() => index===0 && setScreen('battle')}>
+      <section className="matchup-grid">{[0,2,4,6,8].map((i, index) => { const a=teamData[i], b=teamData[i+1]; if (!a || !b) return null; return <article className={`matchup ${index===0?'featured':''}`} key={a.id} onClick={() => {setActiveMatchup(index);setScreen('battle')}}>
         <div className="matchup-top"><span>{index===0?'🔥 FEATURED BATTLE':`MATCHUP ${index+1}`}</span><b>{index < 2 ? 'LIVE' : 'SUN 4:25'}</b></div>
         <div className="versus-row"><div><TeamBadge team={a}/><strong>{a.name}</strong><small>{a.manager} · {a.record}</small></div><div className="scores"><span>{a.score.toFixed(1)} <i>SLEEPER</i></span><b>{a.chaos.toFixed(1)}</b><em>VS</em><b>{b.chaos.toFixed(1)}</b><span>{b.score.toFixed(1)} <i>SLEEPER</i></span></div><div><TeamBadge team={b}/><strong>{b.name}</strong><small>{b.manager} · {b.record}</small></div></div>
         <div className="public-cards"><span>HAND {a.hand} 🂠</span><div>{revealed ? <><i className="mini attack">⚡</i><i className="mini boost">🔥</i></> : '2 HIDDEN'}</div><span>🂠 {b.hand} HAND</span></div>
-        {index===0 && <button className="spectate">ENTER BATTLE →</button>}
+        <button className="spectate">VIEW LINEUPS & BATTLE →</button>
       </article>})}</section>
     </main> : <main className="battle">
       <button className="back" onClick={() => setScreen('room')}>← BACK TO LEAGUE ROOM</button>
+      <LineupComparison home={home} away={away}/>
       <section className="battle-board">
         <div className="combatant left"><TeamBadge team={home}/><div><small>{home.manager} · {home.record}</small><h2>{home.name}</h2></div><div className="score-block"><span>SLEEPER {home.score.toFixed(1)}</span><strong>{chaos.toFixed(1)}</strong><b>CHAOS SCORE</b></div></div>
         <div className="vs-burst">VS<small>WEEK 1 · {revealed?'REVEALED':'PRE-WEEK'}</small></div>
