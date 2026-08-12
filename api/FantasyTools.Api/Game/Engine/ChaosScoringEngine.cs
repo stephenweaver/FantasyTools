@@ -15,6 +15,11 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
 {
     public ChaosScoreResult Calculate(TeamScoreInput input)
     {
+        var cancelledPlayIds = input.Effects
+            .Where(e => NormalizeHandler(e.CustomHandler ?? e.CardName) == "challengeflag")
+            .Select(e => ParseCancelledPlayId(e.Target.DynamicRule))
+            .Where(id => id.HasValue).Select(id => id!.Value).ToHashSet();
+        var activeEffects = input.Effects.Where(e => !cancelledPlayIds.Contains(e.CardPlayId)).ToList();
         var sleeperScore = input.Starters.Sum(slot => slot.RawPoints);
         var running = sleeperScore;
         var effectiveSlotScores = input.Starters.ToDictionary(slot => slot.Slot, slot => slot.RawPoints, StringComparer.OrdinalIgnoreCase);
@@ -24,7 +29,7 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
         };
 
         // Stage 1: special slot replacements establish the base contribution for that slot.
-        foreach (var effect in Ordered(input.Effects.Where(e => e.Type == EffectType.ReferencedPlayerReplacesSlot)))
+        foreach (var effect in Ordered(activeEffects.Where(e => e.Type == EffectType.ReferencedPlayerReplacesSlot)))
         {
             var slot = input.Starters.SingleOrDefault(s => s.Slot.Equals(effect.DestinationSlot, StringComparison.OrdinalIgnoreCase));
             if (slot is null || effect.ReferencedPlayerId is null || effect.Multiplier is null) continue;
@@ -36,13 +41,33 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
             running += change;
             effectiveSlotScores[slot.Slot] = replacement;
             lines.Add(new(1, "slot-replacement",
-                $"{effect.CardName}: replace {slot.Slot} ({slot.RawPoints:0.##}) with player {effect.ReferencedPlayerId} ({referencedScore:0.##}) × {effect.Multiplier:0.##}",
+                $"{effect.CardName}: replace {slot.Slot} ({slot.RawPoints:0.##}) with player {effect.ReferencedPlayerId} ({referencedScore:0.##}) Ã— {effect.Multiplier:0.##}",
                 before, change, running, effect.CardPlayId));
         }
 
+        // Stage 2: specialty rules that change a starter's effective contribution.
+        // These run before percentage cards so later boosts/attacks use the resolved score.
+        foreach (var effect in Ordered(activeEffects.Where(e => e.Type == EffectType.Custom)))
+        {
+            var handler = NormalizeHandler(effect.CustomHandler ?? effect.CardName);
+            var slot = ResolveTargetSlot(effect.Target, input.Starters);
+            var stats = slot is null ? null : input.PlayerStats.GetValueOrDefault(slot.PlayerId);
+            if (TryResolveCustom(handler, effect, slot, stats, input, effectiveSlotScores,
+                    out var change, out var description))
+            {
+                var before = running;
+                running += change;
+                if (slot is not null)
+                    effectiveSlotScores[slot.Slot] = effectiveSlotScores.GetValueOrDefault(slot.Slot, slot.RawPoints) + change;
+                lines.Add(new(2, "specialty", $"{effect.CardName}: {description}", before, change, running, effect.CardPlayId));
+            }
+            else
+                lines.Add(new(2, "custom-pending", $"{effect.CardName} is waiting for its required player statistics or rule handler.", running, 0m, running, effect.CardPlayId));
+        }
+
         // Stages 2-4: defenses modify applicable incoming percentage attacks.
-        var percentageEffects = input.Effects.Where(e => e.Type == EffectType.Percentage).ToList();
-        var defenses = input.Effects.Where(e => e.Type is EffectType.BlockAttack or EffectType.ReduceAttack).ToList();
+        var percentageEffects = activeEffects.Where(e => e.Type == EffectType.Percentage).ToList();
+        var defenses = activeEffects.Where(e => e.Type is EffectType.BlockAttack or EffectType.ReduceAttack).ToList();
         foreach (var targetGroup in percentageEffects.GroupBy(effect => TargetKey(effect.Target)).OrderBy(group => group.Key))
         {
             decimal netPercentage = 0m;
@@ -76,18 +101,161 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
         }
 
         // Stage 6: flat modifiers apply after percentages.
-        foreach (var effect in Ordered(input.Effects.Where(e => e.Type == EffectType.FlatPoints)))
+        foreach (var effect in Ordered(activeEffects.Where(e => e.Type == EffectType.FlatPoints)))
         {
             var before = running;
             running += effect.Amount;
             lines.Add(new(6, "flat", effect.CardName, before, effect.Amount, running, effect.CardPlayId));
         }
 
-        // Custom handlers intentionally require an explicit registered implementation; they never silently execute here.
-        foreach (var effect in Ordered(input.Effects.Where(e => e.Type == EffectType.Custom)))
-            lines.Add(new(7, "custom-pending", $"{effect.CardName} requires handler '{effect.CustomHandler}'.", running, 0m, running, effect.CardPlayId));
-
         return new(sleeperScore, decimal.Round(running, 2, MidpointRounding.AwayFromZero), lines);
+    }
+
+    private static bool TryResolveCustom(string handler, ActiveEffect effect, SlotScore? slot, PlayerWeekStats? stats,
+        TeamScoreInput input, IReadOnlyDictionary<string, decimal> effectiveScores,
+        out decimal change, out string description)
+    {
+        change = 0m;
+        description = "";
+        if (handler == "caphit")
+        {
+            change = input.Starters.Sum(s => Math.Min(effectiveScores.GetValueOrDefault(s.Slot, s.RawPoints), 15m)
+                                       - effectiveScores.GetValueOrDefault(s.Slot, s.RawPoints));
+            description = "capped every starter at 15 points";
+            return true;
+        }
+        if (handler == "challengeflag")
+        {
+            change = 0m;
+            description = "cancelled the selected opposing card before scoring";
+            return true;
+        }
+        if (handler == "buttfumble")
+        {
+            var fumbles = input.Starters.Sum(s => input.PlayerStats.GetValueOrDefault(s.PlayerId)?.Fumbles ?? 0);
+            change = fumbles * 5m;
+            description = $"added 5 points for each of the team's {fumbles} fumbles";
+            return true;
+        }
+        if (handler == "injured")
+        {
+            var injured = input.Starters.Any(s => input.PlayerStats.GetValueOrDefault(s.PlayerId)?.LeftGameInjuredAndDidNotReturn == true);
+            change = injured ? 50m : 0m;
+            description = injured ? "added 50 points because a starter left injured and did not return" : "no qualifying starter injury occurred";
+            return true;
+        }
+        if (handler == "283")
+        {
+            if (input.ScoreEnteringMonday is null || input.OpponentScoreEnteringMonday is null) return false;
+            var deficit = input.OpponentScoreEnteringMonday.Value - input.ScoreEnteringMonday.Value;
+            change = deficit >= 50m ? 40m : 0m;
+            description = deficit >= 50m ? $"added 40 points after entering Monday down {deficit:0.##}" : $"no bonus because the Monday deficit was {Math.Max(0, deficit):0.##}";
+            return true;
+        }
+        if (handler == "mvp")
+        {
+            if (slot is null || input.LeagueHighestPlayerScore is null) return false;
+            var existing = effectiveScores.GetValueOrDefault(slot.Slot, slot.RawPoints);
+            change = input.LeagueHighestPlayerScore.Value - existing;
+            description = $"replaced {slot.PlayerName}'s {existing:0.##} with the league-high score of {input.LeagueHighestPlayerScore:0.##}";
+            return true;
+        }
+        if (handler is "spygate" or "tradedwr" or "tradedrb" or "tradedte")
+        {
+            if (slot is null || effect.ReferencedPlayerId is null || !input.ReferencedPlayerScores.TryGetValue(effect.ReferencedPlayerId, out var replacement)) return false;
+            var existing = effectiveScores.GetValueOrDefault(slot.Slot, slot.RawPoints);
+            change = replacement - existing;
+            description = $"replaced {slot.PlayerName}'s {existing:0.##} with {replacement:0.##}";
+            return true;
+        }
+        if (handler == "1v1mebro")
+        {
+            if (slot is null || effect.ReferencedPlayerId is null || !input.ReferencedPlayerScores.TryGetValue(effect.ReferencedPlayerId, out var opposing)) return false;
+            var own = effectiveScores.GetValueOrDefault(slot.Slot, slot.RawPoints);
+            change = own >= opposing ? opposing : -own;
+            description = own >= opposing ? $"{slot.PlayerName} won {own:0.##} to {opposing:0.##} and claimed both scores" : $"{slot.PlayerName} lost {own:0.##} to {opposing:0.##}, so the opponent claimed both scores";
+            return true;
+        }
+        if (handler == "picksix")
+        {
+            // The play service emits one attack effect for the opponent QB and one
+            // boost effect for the card owner's defense, both carrying the same QB id.
+            var qbId = effect.ReferencedPlayerId ?? slot?.PlayerId;
+            if (qbId is null || !input.PlayerStats.TryGetValue(qbId, out var quarterbackStats)) return false;
+            change = effect.Category == CardCategory.Attack ? -quarterbackStats.TouchdownPoints : quarterbackStats.TouchdownPoints;
+            description = effect.Category == CardCategory.Attack
+                ? $"removed {quarterbackStats.TouchdownPoints:0.##} quarterback touchdown points"
+                : $"awarded {quarterbackStats.TouchdownPoints:0.##} intercepted touchdown points to the defense";
+            return true;
+        }
+        if (slot is null || stats is null) return false;
+        var current = effectiveScores.GetValueOrDefault(slot.Slot, slot.RawPoints);
+        switch (handler)
+        {
+            case "doubleornothing":
+                var multiplier = stats.Receptions >= 5 ? 2m : 0m;
+                change = current * multiplier - current;
+                description = stats.Receptions >= 5
+                    ? $"{slot.PlayerName} had {stats.Receptions} catches, doubling {current:0.##} to {current * 2m:0.##}"
+                    : $"{slot.PlayerName} had {stats.Receptions} catches, reducing {current:0.##} to zero";
+                return true;
+            case "complete":
+                change = stats.Completions * 2m;
+                description = $"added 2 points for each of {stats.Completions} completions";
+                return true;
+            case "incomplete":
+                var incompletions = Math.Max(0, stats.PassingAttempts - stats.Completions);
+                change = incompletions * 3m;
+                description = $"added 3 points for each of {incompletions} incompletions";
+                return true;
+            case "sacked":
+                change = stats.SacksTaken * -5m;
+                description = $"subtracted 5 points for each of {stats.SacksTaken} sacks";
+                return true;
+            case "doubletd":
+                change = stats.TouchdownPoints;
+                description = $"doubled {stats.TouchdownPoints:0.##} touchdown points for {slot.PlayerName}";
+                return true;
+            case "roughstart":
+                change = -15m;
+                description = $"started {slot.PlayerName} at minus 15 points";
+                return true;
+            case "stickyhands":
+                change = stats.Receptions * 2m;
+                description = $"added 2 points for each of {stats.Receptions} receptions";
+                return true;
+            case "beastmode":
+                change = stats.RushingYards * 0.3m;
+                description = $"added 0.3 points for each of {stats.RushingYards:0.##} rushing yards";
+                return true;
+            case "fafb":
+                change = stats.RushingYardPoints;
+                description = $"doubled {stats.RushingYardPoints:0.##} quarterback rushing-yard points";
+                return true;
+            case "shoestringtackle":
+                change = current * 0.5m;
+                description = $"increased {slot.PlayerName}'s defense score by 50%";
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static SlotScore? ResolveTargetSlot(CardTarget target, IReadOnlyList<SlotScore> starters) => target.Type switch
+    {
+        TargetType.SpecificPlayer => starters.SingleOrDefault(s => s.PlayerId == target.NflPlayerId),
+        TargetType.StartingSlot => starters.SingleOrDefault(s => s.Slot.Equals(target.StartingSlot, StringComparison.OrdinalIgnoreCase)),
+        _ => null
+    };
+
+    private static string NormalizeHandler(string value) =>
+        new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static Guid? ParseCancelledPlayId(string? dynamicRule)
+    {
+        const string prefix = "cancel:";
+        if (dynamicRule is null || !dynamicRule.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+        return Guid.TryParse(dynamicRule[prefix.Length..], out var id) ? id : null;
     }
 
     private static IEnumerable<ActiveEffect> Ordered(IEnumerable<ActiveEffect> effects) =>
@@ -139,3 +307,4 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
         _ => "Target"
     };
 }
+
