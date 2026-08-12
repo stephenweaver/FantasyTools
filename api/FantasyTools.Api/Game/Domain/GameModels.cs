@@ -60,6 +60,20 @@ public sealed record CardPlay(
 
 public sealed record SlotScore(string Slot, string PlayerId, string PlayerName, string Position, decimal RawPoints);
 
+// The scoring provider supplies these raw weekly totals. Specialty cards use them
+// instead of trying to infer football statistics from a fantasy-point total.
+public sealed record PlayerWeekStats(
+    int Receptions = 0,
+    int Completions = 0,
+    int PassingAttempts = 0,
+    int SacksTaken = 0,
+    int Fumbles = 0,
+    decimal TouchdownPoints = 0m,
+    decimal RushingYards = 0m,
+    decimal PassingYards = 0m,
+    decimal RushingYardPoints = 0m,
+    bool LeftGameInjuredAndDidNotReturn = false);
+
 public sealed record ActiveEffect(
     Guid CardPlayId,
     string CardName,
@@ -76,7 +90,14 @@ public sealed record TeamScoreInput(
     Guid TeamId,
     IReadOnlyList<SlotScore> Starters,
     IReadOnlyDictionary<string, decimal> ReferencedPlayerScores,
-    IReadOnlyList<ActiveEffect> Effects);
+    IReadOnlyList<ActiveEffect> Effects)
+{
+    public IReadOnlyDictionary<string, PlayerWeekStats> PlayerStats { get; init; } =
+        new Dictionary<string, PlayerWeekStats>();
+    public decimal? ScoreEnteringMonday { get; init; }
+    public decimal? OpponentScoreEnteringMonday { get; init; }
+    public decimal? LeagueHighestPlayerScore { get; init; }
+}
 
 public sealed record CalculationLine(
     int Stage,
@@ -114,3 +135,4 @@ public sealed record RuleDecision(bool Allowed, string Code, string Message)
     public static RuleDecision Permit() => new(true, "allowed", "The play is valid.");
     public static RuleDecision Reject(string code, string message) => new(false, code, message);
 }
+
