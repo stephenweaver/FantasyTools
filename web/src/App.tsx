@@ -309,6 +309,11 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
     await apiFetch(`/api/leagues/${workspaceId}/rosters/${team.id}`,{method:'DELETE'})
     const next=rosterAssignments.filter(item=>item.rosterId!==team.id); setRosterAssignments(next); localStorage.setItem('chaos-roster-assignments',JSON.stringify(next))
   }
+  const reviewRosterClaim = async (id:string, approve:boolean) => {
+    const workspace=await apiFetch<RosterWorkspace>(`/api/leagues/${workspaceId}/rosters/claims/${id}?approve=${approve}`,{method:'POST'})
+    setRosterAssignments(workspace.assignments)
+    setRosterClaims(workspace.claims||[])
+  }
 
   const chaos = useMemo(() => {
     let score = home.score
@@ -425,7 +430,6 @@ function LeagueOnboarding({ onCreated }: { onCreated: (league: ChaosLeague) => v
     } catch (ex) { setError((ex as Error).message) }
     finally { setBusy(false) }
   }
-  const reviewRosterClaim = async (id:string, approve:boolean) => { const workspace=await apiFetch<RosterWorkspace>(`/api/leagues/${workspaceId}/rosters/claims/${id}?approve=${approve}`,{method:'POST'}); setRosterAssignments(workspace.assignments); setRosterClaims(workspace.claims||[]) }
   const create = async () => {
     if (!preview) return
     setBusy(true); setError('')
