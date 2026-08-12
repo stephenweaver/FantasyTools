@@ -9,12 +9,28 @@ public enum LoginOutcome
     EmailNotVerified
 }
 
+public enum RegisterOutcome
+{
+    Created,
+
+    /// <summary>The address had an unverified account and the right password, so the link was sent again.</summary>
+    Reissued,
+
+    /// <summary>Verified already, or the password did not match. Answered the same way for both.</summary>
+    AlreadyExists
+}
+
 public interface IAuthService
 {
     /// <summary>
     /// Creates the account and sends the verification email. No session is issued -- the caller must
-    /// verify first. Throws <see cref="ArgumentException"/> on invalid input or a duplicate email.
+    /// verify first. Throws <see cref="ArgumentException"/> on invalid input or a duplicate email, and
+    /// <see cref="EmailDeliveryException"/> when the account was written but the mail could not be sent.
     /// </summary>
+    /// <remarks>
+    /// Registering an address that already has an *unverified* account is not a duplicate: given the
+    /// right password it re-sends that account's link. See <c>AuthService.Reissue</c>.
+    /// </remarks>
     Task Register(RegisterRequestModel request);
 
     Task<(LoginOutcome Outcome, AuthResponseModel Response)> Login(LoginRequestModel request);

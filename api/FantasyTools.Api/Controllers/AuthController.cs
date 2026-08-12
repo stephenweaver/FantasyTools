@@ -8,7 +8,11 @@ namespace FantasyTools.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(IAuthService authService, ITurnstileService turnstileService) : ControllerBase
+public class AuthController(
+    IAuthService authService,
+    ITurnstileService turnstileService,
+    ILogger<AuthController> logger
+    ) : ControllerBase
 {
     [HttpPost("register")]
     [AllowAnonymous]
@@ -26,6 +30,17 @@ public class AuthController(IAuthService authService, ITurnstileService turnstil
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (EmailDeliveryException ex)
+        {
+            // The account exists by this point -- the document is written before the send and there is
+            // no transaction to undo it. Saying so is better than a 500: retrying the same form is the
+            // documented recovery, and Register re-sends for an unverified account rather than
+            // reporting a duplicate.
+            logger.LogError(ex, "Registration for {Email} could not send its verification email.", request?.Email);
+
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                "We could not send your verification email just now. Please try again in a moment.");
         }
 
         // No session yet -- the account is unusable until the emailed link is followed.
@@ -75,7 +90,18 @@ public class AuthController(IAuthService authService, ITurnstileService turnstil
             return BadRequest("Captcha verification failed. Please try again.");
         }
 
-        await authService.ResendVerification(request?.Email);
+        try
+        {
+            await authService.ResendVerification(request?.Email);
+        }
+        catch (EmailDeliveryException ex)
+        {
+            // Deliberately NOT the 503 that register returns. A send is only attempted here for an
+            // address that has an unverified account, so a distinct answer on failure would say that
+            // the account exists -- exactly what the unconditional 204 below exists to hide. The
+            // failure goes to the log, where it cannot be read by whoever is probing.
+            logger.LogError(ex, "A verification resend failed.");
+        }
 
         // Always 204, so this is not an oracle for which addresses are registered.
         return NoContent();

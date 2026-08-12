@@ -1,6 +1,6 @@
 using FantasyTools.Api.Documents;
+using FantasyTools.Api.HttpClients;
 using Microsoft.Extensions.Logging;
-using StephenWeaver.Common.Model.MailerSend;
 using System.Text;
 
 namespace FantasyTools.Api.Services;
@@ -11,17 +11,25 @@ public interface IEmailService
 }
 
 /// <summary>
-/// Sends through MailerSend (already registered by RegisterStephenWeaverCommon) and/or writes the
-/// rendered message to a local outbox folder.
+/// The message did not get out. Distinct from the transport's own exception type so callers can answer
+/// "mail is down" without knowing or caring which provider is configured.
+/// </summary>
+public class EmailDeliveryException(string message, Exception inner) : Exception(message, inner);
+
+/// <summary>
+/// Sends through Resend and/or writes the rendered message to a local outbox folder.
 /// </summary>
 /// <remarks>
-/// MAIL_TRANSPORT picks the behaviour: <c>mailersend</c>, <c>outbox</c>, or <c>both</c>. It defaults to
-/// mailersend when MAILERSEND_API_KEY is set and outbox otherwise, so a fresh clone with no mail
-/// credentials still completes the verification loop. Locally it is pinned to outbox so test runs do not
-/// push mail at throwaway addresses through the real account.
+/// MAIL_TRANSPORT picks the behaviour: <c>resend</c>, <c>outbox</c>, or <c>both</c>. It defaults to
+/// resend when RESEND_API_KEY is set and outbox otherwise, so a fresh clone with no mail credentials
+/// still completes the verification loop. Locally it is pinned to outbox so test runs do not push mail
+/// at throwaway addresses through the real account.
+///
+/// The Common package still registers its MailerSend client -- that is shared with StockScreener and is
+/// simply unused here. Nothing in this repo resolves IMailerSendService.
 /// </remarks>
 public class EmailService(
-    IMailerSendService mailerSendService,
+    IResendHttpClient resendHttpClient,
     ILogger<EmailService> logger
     ) : IEmailService
 {
@@ -49,31 +57,40 @@ public class EmailService(
             await WriteToOutbox(user, subject, text);
         }
 
-        if (transport is "mailersend" or "both")
+        if (transport is "resend" or "both")
         {
-            await SendViaMailerSend(user, subject, html, text);
+            await SendViaResend(user, subject, html, text);
         }
     }
 
-    private async Task SendViaMailerSend(UserDocument user, string subject, string html, string text)
+    private async Task SendViaResend(UserDocument user, string subject, string html, string text)
     {
-        var request = new SendEmailRequestModel
+        string messageId;
+
+        try
         {
-            From = new From
-            {
-                Email = EnvironmentHelper.GetVar("MAIL_FROM_EMAIL"),
-                Name = EnvironmentHelper.GetVar("MAIL_FROM_NAME") ?? "FantasyTools"
-            },
-            To = [new To { Email = user.Email, Name = user.Name }],
-            Subject = subject,
-            Html = html,
-            Text = text
-        };
+            messageId = await resendHttpClient.SendEmail(GetFrom(), user.Email, subject, html, text);
+        }
+        catch (Exception ex)
+        {
+            // Rethrown as one type so AuthController can answer 503 without referencing Resend. The
+            // provider's own wording is kept as the inner exception -- it is usually the whole answer.
+            throw new EmailDeliveryException($"Could not send the verification email to {user.Email}.", ex);
+        }
 
-        var response = await mailerSendService.SendEmail(request);
+        logger.LogInformation("Sent verification email to {Email} (message {MessageId})", user.Email, messageId);
+    }
 
-        logger.LogInformation("Sent verification email to {Email} (message {MessageId})",
-            user.Email, response?.MessageId);
+    /// <summary>
+    /// Resend takes a single from string. The address must be on a domain verified in the Resend
+    /// dashboard -- an unverified one is a 403 at send time, not a configuration error caught earlier.
+    /// </summary>
+    private static string GetFrom()
+    {
+        var email = EnvironmentHelper.GetVar("MAIL_FROM_EMAIL");
+        var name = EnvironmentHelper.GetVar("MAIL_FROM_NAME");
+
+        return string.IsNullOrWhiteSpace(name) ? email : $"{name} <{email}>";
     }
 
     private async Task WriteToOutbox(UserDocument user, string subject, string text)
@@ -104,13 +121,15 @@ public class EmailService(
     {
         var configured = EnvironmentHelper.GetVar("MAIL_TRANSPORT")?.Trim().ToLowerInvariant();
 
-        if (configured is "outbox" or "mailersend" or "both")
+        if (configured is "outbox" or "resend" or "both")
         {
             return configured;
         }
 
-        return string.IsNullOrWhiteSpace(EnvironmentHelper.GetVar("MAILERSEND_API_KEY"))
+        // Anything unrecognised -- including a leftover "mailersend" -- falls through to the default
+        // rather than silently sending nothing.
+        return string.IsNullOrWhiteSpace(EnvironmentHelper.GetVar("RESEND_API_KEY"))
             ? "outbox"
-            : "mailersend";
+            : "resend";
     }
 }

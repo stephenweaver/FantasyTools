@@ -1,24 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { apiFetch, getToken } from './lib/api'
+import { apiFetch } from './lib/api'
+import { useAuth } from './lib/auth'
+import { cards, ChaosCard, type Card, type Category } from './lib/cards'
 
-type Category = 'ATTACK' | 'BOOST' | 'DEFENSE'
-type Card = { id: number; name: string; category: Category; amount: number; target: string; copy: string; icon: string }
 type Team = { id: number; manager: string; name: string; initials: string; record: string; score: number; chaos: number; hand: number; accent: string; sleeperUserId?: string }
 type RosterAssignment = { rosterId: number; sleeperUserId: string; sleeperManagerName: string; sleeperTeamName: string; fantasyToolsUserId?: string; fantasyToolsEmail: string; fantasyToolsName?: string }
 type CardStatus = 'IDEA' | 'ARTWORK READY' | 'NEEDS REVIEW' | 'ACTIVE' | 'ARCHIVED'
 type UploadedCard = Card & { serverId?: string; artwork: string; rarity: string; copies: number; active: boolean; status: CardStatus; notes: string; updatedBy: string; updatedAt: string; effectType: string; special: boolean; sourcePlayer?: string; sourcePlayerId?: string; destinationSlot?: string; multiplier?: number }
 
 const CHAOS_LEAGUE_ID = '1301750882777456640'
-const fromServerCard = (card: any): UploadedCard => ({ id: Number(String(card.id).replace(/\D/g,'').slice(0,12)) || Date.now(), serverId: card.id, name: card.name, category: card.category, amount: card.amount, target: card.target, copy: card.officialDescription, icon: card.category === 'ATTACK' ? '⚡' : card.category === 'BOOST' ? '🔥' : '🛡', artwork: card.artworkDataUrl || '', rarity: card.rarity, copies: card.copies, active: card.status === 'ACTIVE', status: card.status, notes: card.commissionerNotes || '', updatedBy: card.updatedByName || 'Commissioner', updatedAt: card.updatedAt, effectType: card.effectType, special: card.isSpecial, sourcePlayer: card.sourcePlayer, sourcePlayerId: card.sourcePlayerId, destinationSlot: card.destinationSlot, multiplier: card.multiplier })
-const toServerCard = (card: UploadedCard, submitForReview: boolean) => ({ name: card.name, category: card.category, rarity: card.rarity, isSpecial: card.special, artworkDataUrl: card.artwork, officialDescription: card.copy, commissionerNotes: card.notes, target: card.target, effectType: card.effectType, amount: card.amount, copies: card.copies, sourcePlayer: card.sourcePlayer, sourcePlayerId: card.sourcePlayerId, destinationSlot: card.destinationSlot, multiplier: card.multiplier, submitForReview })
-
-const cards: Card[] = [
-  { id: 1, name: 'Crushing Blow', category: 'ATTACK', amount: -50, target: 'Opponent QB slot', copy: 'Cut the opposing starting QB slot score by 50%.', icon: '⚡' },
-  { id: 2, name: 'End Zone Fever', category: 'BOOST', amount: 25, target: 'Your WR1 slot', copy: 'Boost your starting WR1 slot score by 25%.', icon: '🔥' },
-  { id: 3, name: 'Lockdown', category: 'DEFENSE', amount: 50, target: 'Your QB slot', copy: 'Reduce attacks against your QB slot by 50%.', icon: '🛡' },
-  { id: 4, name: 'Turf Monster', category: 'ATTACK', amount: -20, target: 'Opponent RB1 slot', copy: 'Cut the opposing starting RB1 slot score by 20%.', icon: '🕳' },
-  { id: 5, name: 'Hail Mary', category: 'BOOST', amount: 8, target: 'Your team', copy: 'Add 8 points to your Chaos score.', icon: '🏈' },
-]
+const fromServerCard = (card: any): UploadedCard => ({ id: Number(String(card.id).replace(/\D/g,'').slice(0,12)) || Date.now(), serverId: card.id, name: card.name, category: card.category, amount: card.amount, target: card.target, copy: card.officialDescription, icon: card.category === 'ATTACK' ? '⚡' : card.category === 'BOOST' ? '🔥' : '🛡', artwork: card.artworkUrl || '', rarity: card.rarity, copies: card.copies, active: card.status === 'ACTIVE', status: card.status, notes: card.commissionerNotes || '', updatedBy: card.updatedByName || 'Commissioner', updatedAt: card.updatedAt, effectType: card.effectType, special: card.isSpecial, sourcePlayer: card.sourcePlayer, sourcePlayerId: card.sourcePlayerId, destinationSlot: card.destinationSlot, multiplier: card.multiplier })
+const toServerCard = (card: UploadedCard, submitForReview: boolean) => ({ name: card.name, category: card.category, rarity: card.rarity, isSpecial: card.special, artworkUrl: card.artwork, officialDescription: card.copy, commissionerNotes: card.notes, target: card.target, effectType: card.effectType, amount: card.amount, copies: card.copies, sourcePlayer: card.sourcePlayer, sourcePlayerId: card.sourcePlayerId, destinationSlot: card.destinationSlot, multiplier: card.multiplier, submitForReview })
 
 const mockTeams: Team[] = [
   { id: 1, manager: 'Matthew', name: 'Gridiron Goblins', initials: 'GG', record: '5–2', score: 117.4, chaos: 124.7, hand: 5, accent: '#9cff57' },
@@ -39,16 +31,6 @@ const initialLog = [
   ['12:55 PM', '⚡', 'Stephen played CRUSHING BLOW against Matthew’s QB slot.'],
   ['THU', '👁', 'Pre-week cards revealed across the Chaos League.'],
 ]
-
-function ChaosCard({ card, selected, compact, onClick }: { card: Card; selected?: boolean; compact?: boolean; onClick?: () => void }) {
-  return <button className={`chaos-card ${card.category.toLowerCase()} ${selected ? 'selected' : ''} ${compact ? 'compact' : ''}`} onClick={onClick} type="button">
-    <div className="card-rarity">CHAOS • COMMON</div>
-    <div className="card-art"><span>{card.icon}</span><i /></div>
-    <div className="card-name">{card.name}</div>
-    <div className="card-category">{card.category}</div>
-    {!compact && <><p>{card.copy}</p><div className="card-target">TARGET · {card.target}</div></>}
-  </button>
-}
 
 function TeamBadge({ team, small }: { team: Team; small?: boolean }) {
   return <div className={`team-badge ${small ? 'small' : ''}`} style={{ '--team': team.accent } as React.CSSProperties}>{team.initials}</div>
@@ -98,14 +80,20 @@ function CardCreator({ initialCard, onSave, onCancel }: { initialCard: UploadedC
   const [artwork, setArtwork] = useState(initialCard?.artwork || '')
   const [notes, setNotes] = useState(initialCard?.notes || '')
   const [error, setError] = useState('')
+  const [uploading, setUploading] = useState(false)
 
-  const upload = (file?: File) => {
+  // The image goes to the images bucket first and the card stores only the URL it comes back with.
+  // The endpoint requires a bearer token, so this is the point where an expired session shows up.
+  const upload = async (file?: File) => {
     if (!file) return
     if (!['image/png','image/jpeg','image/webp'].includes(file.type)) { setError('Please choose a PNG, JPG, or WebP image.'); return }
-    if (file.size > 3 * 1024 * 1024) { setError('For this local prototype, keep artwork under 3 MB.'); return }
-    const reader = new FileReader()
-    reader.onload = () => { setArtwork(String(reader.result)); setError('') }
-    reader.readAsDataURL(file)
+    if (file.size > 8 * 1024 * 1024) { setError('Artwork must be smaller than 8 MB.'); return }
+    const body = new FormData()
+    body.append('file', file)
+    setUploading(true); setError('')
+    try { setArtwork((await apiFetch<{url:string}>('/api/images',{method:'POST',body})).url) }
+    catch (ex) { setError((ex as Error).message) }
+    finally { setUploading(false) }
   }
 
   const save = async (submitForReview: boolean) => {
@@ -120,10 +108,10 @@ function CardCreator({ initialCard, onSave, onCancel }: { initialCard: UploadedC
   return <main className="admin-page"><div className="admin-heading"><div><div className="eyebrow">SHARED COMMISSIONER WORKSPACE</div><h1>{initialCard ? 'Edit Card Draft' : 'Card Creator'}</h1><p>Save artwork and ideas now. Finish the engine rules together before approving the card for the deck.</p></div><button className="secondary" onClick={onCancel}>VIEW CARD LIBRARY →</button></div>
     <div className="creator-layout"><section className="creator-form">
       <div className="form-section"><h3>01 · CARD IDENTITY & SEARCH DATA</h3><div className="form-grid"><label className="wide">CARD NAME<input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Crushing Blow" /></label><label>CATEGORY<select value={category} onChange={e=>setCategory(e.target.value as Category)}><option>ATTACK</option><option>BOOST</option><option>DEFENSE</option></select></label><label>RARITY<select value={rarity} onChange={e=>setRarity(e.target.value)}><option>Common</option><option>Uncommon</option><option>Rare</option><option>Legendary</option></select></label><label className="wide">RULES SUMMARY FOR THE GAME LOG<textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Store the card effect as searchable text. This will not be printed over the artwork." /></label></div></div>
-      <div className="form-section"><h3>02 · COMPLETE FINISHED CARD</h3><label className={`upload-zone ${artwork?'has-art':''}`}><input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>upload(e.target.files?.[0])}/>{artwork?<><img src={artwork}/><span>CHOOSE A DIFFERENT FINISHED CARD</span></>:<><b>↑</b><strong>UPLOAD THE COMPLETE CARD IMAGE</strong><span>NAME, ARTWORK AND PRINTED DESCRIPTION SHOULD ALREADY BE INCLUDED</span></>}</label></div>
+      <div className="form-section"><h3>02 · COMPLETE FINISHED CARD</h3><label className={`upload-zone ${artwork?'has-art':''}`}><input type="file" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={e=>upload(e.target.files?.[0])}/>{uploading?<><b>⋯</b><strong>UPLOADING…</strong><span>SENDING THE IMAGE TO THE CARD IMAGE STORE</span></>:artwork?<><img src={artwork}/><span>CHOOSE A DIFFERENT FINISHED CARD</span></>:<><b>↑</b><strong>UPLOAD THE COMPLETE CARD IMAGE</strong><span>NAME, ARTWORK AND PRINTED DESCRIPTION SHOULD ALREADY BE INCLUDED</span></>}</label></div>
       <div className="form-section"><h3>03 · GAME RULES</h3><div className="form-grid"><label>TARGET TYPE<select value={target} onChange={e=>setTarget(e.target.value)}><option>Opponent QB slot</option><option>Opponent RB1 slot</option><option>Opponent WR1 slot</option><option>Your QB slot</option><option>Your WR1 slot</option><option>Your team</option><option>Opponent team</option><option>Dynamic target</option></select></label><label>EFFECT TYPE<select value={effectType} onChange={e=>setEffectType(e.target.value)}><option>Percentage decrease</option><option>Percentage increase</option><option>Add flat points</option><option>Subtract flat points</option><option>Block attack</option><option>Reduce attack</option><option>Referenced player replaces slot</option><option>Custom handler</option></select></label>{effectType === 'Referenced player replaces slot' ? <><label>SCORE SOURCE PLAYER<input value={sourcePlayer} onChange={e=>setSourcePlayer(e.target.value)} placeholder="Patrick Mahomes" /></label><label>SLEEPER PLAYER ID<input value={sourcePlayerId} onChange={e=>setSourcePlayerId(e.target.value)} placeholder="4046" /></label><label>DESTINATION SLOT<select value={destinationSlot} onChange={e=>setDestinationSlot(e.target.value)}><option>Your starting QB slot</option><option>Your starting RB1 slot</option><option>Your starting WR1 slot</option><option>Your starting TE slot</option><option>Your Flex slot</option></select></label><label>SCORE MULTIPLIER<input type="number" step="0.25" value={multiplier} onChange={e=>setMultiplier(Number(e.target.value))}/></label><div className="resolution-example wide"><b>RESOLUTION FORMULA</b><code>Chaos team score − actual slot points + ({sourcePlayer || 'source player'} points × {multiplier})</code><small>The source player does not need to be on the manager’s roster.</small></div></> : <label>EFFECT AMOUNT<input type="number" value={amount} onChange={e=>setAmount(Number(e.target.value))}/></label>}<label>COPIES IN DECK<input type="number" min="1" max="99" value={copies} onChange={e=>setCopies(Number(e.target.value))}/></label><label className="check wide"><input type="checkbox" checked={special} onChange={e=>setSpecial(e.target.checked)}/><span><b>SPECIAL CARD</b><small>Marks this card as unusual or powerful. Draw odds are unchanged.</small></span></label></div></div>
       <div className="form-section"><h3>COMMISSIONER NOTES</h3><div className="form-grid"><label className="wide">BRAINSTORMING, QUESTIONS, AND TODO ITEMS<textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Example: Confirm the timing. Stephen will finish the multiplier." /></label></div></div>
-      {error && <div className="form-error">⚠ {error}</div>}<div className="draft-actions"><button className="secondary" onClick={()=>save(false)}>SAVE DRAFT</button><button className="primary save-card" onClick={()=>save(true)}>SUBMIT FOR REVIEW <span>→</span></button></div>
+      {error && <div className="form-error">⚠ {error}</div>}<div className="draft-actions"><button className="secondary" disabled={uploading} onClick={()=>save(false)}>SAVE DRAFT</button><button className="primary save-card" disabled={uploading} onClick={()=>save(true)}>SUBMIT FOR REVIEW <span>→</span></button></div>
     </section><aside className="creator-preview"><div className="preview-label">FINISHED CARD PREVIEW</div><div className={`uploaded-preview final-card ${category.toLowerCase()}`}>{artwork?<img src={artwork}/>:<div className="empty-art"><span>{category==='ATTACK'?'⚡':category==='BOOST'?'🔥':'🛡'}</span><small>UPLOAD YOUR COMPLETE CARD</small></div>}</div><div className="engine-stats"><h3>GAME ENGINE STATS</h3><p><span>Card</span><b>{name || 'Not named yet'}</b></p><p><span>Category</span><b>{category}</b></p><p><span>Target</span><b>{target}</b></p><p><span>Effect</span><b>{effectType === 'Referenced player replaces slot' ? `${sourcePlayer} × ${multiplier} → ${destinationSlot}` : `${effectType} · ${amount}`}</b></p><p><span>Deck copies</span><b>{copies}</b></p></div><p className="preview-note">These stats are stored separately. They will never cover or alter your finished card image.</p></aside></div>
   </main>
 }
@@ -176,7 +164,9 @@ function CommissionerAccess({ teams, grants, onChange }: { teams: Team[]; grants
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<'login' | 'room' | 'battle' | 'admin' | 'library' | 'permissions' | 'rosters'>(() => getToken() ? 'room' : 'login')
+  // Only ever rendered behind the auth gate in main.tsx, so there is no signed-out screen here.
+  const { user: account, logout } = useAuth()
+  const [screen, setScreen] = useState<'room' | 'battle' | 'admin' | 'library' | 'permissions' | 'rosters'>('room')
   const [selected, setSelected] = useState<number[]>([])
   const [played, setPlayed] = useState<Card[]>([])
   const [pending, setPending] = useState<Card[]>([])
@@ -217,7 +207,6 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!getToken()) return
     apiFetch<{cards: any[]}>(`/api/leagues/${CHAOS_LEAGUE_ID}/cards`)
       .then(workspace => {
         const shared = workspace.cards.map(fromServerCard)
@@ -230,22 +219,19 @@ export default function App() {
       .catch(() => { /* The commissioner starts setup from the roster screen. */ })
   }, [])
 
+  // The server is the record for every card mutation -- localStorage only mirrors the answer so a
+  // reload paints something before the workspace request returns.
   const saveUploadedCard = async (card: UploadedCard) => {
-    let saved = card
-    if (getToken()) {
-      const path = card.serverId ? `/api/leagues/${CHAOS_LEAGUE_ID}/cards/${card.serverId}` : `/api/leagues/${CHAOS_LEAGUE_ID}/cards`
-      const response = await apiFetch<any>(path,{method:card.serverId?'PUT':'POST',body:JSON.stringify(toServerCard(card,card.status==='NEEDS REVIEW'))})
-      saved = fromServerCard(response)
-    }
+    const path = card.serverId ? `/api/leagues/${CHAOS_LEAGUE_ID}/cards/${card.serverId}` : `/api/leagues/${CHAOS_LEAGUE_ID}/cards`
+    const saved = fromServerCard(await apiFetch<any>(path,{method:card.serverId?'PUT':'POST',body:JSON.stringify(toServerCard(card,card.status==='NEEDS REVIEW'))}))
     const next = uploadedCards.some(existing=>existing.id===card.id) ? uploadedCards.map(existing=>existing.id===card.id?saved:existing) : [...uploadedCards, saved]
-    try { localStorage.setItem('chaos-uploaded-cards', JSON.stringify(next)); setUploadedCards(next); setScreen('library'); setActiveNav('Card Library') }
-    catch { alert('The image is too large for browser-local storage. Try a smaller image.') }
+    localStorage.setItem('chaos-uploaded-cards', JSON.stringify(next)); setUploadedCards(next); setScreen('library'); setActiveNav('Card Library')
   }
   const updateCardStatus = async (id: number, status: CardStatus) => {
     const current = uploadedCards.find(card=>card.id===id)
-    let saved = current ? {...current,status,active:status==='ACTIVE',updatedBy:'Matthew',updatedAt:new Date().toISOString()} : null
-    if (getToken() && current?.serverId) saved = fromServerCard(await apiFetch<any>(`/api/leagues/${CHAOS_LEAGUE_ID}/cards/${current.serverId}/status`,{method:'POST',body:JSON.stringify({status})}))
-    const next = uploadedCards.map(card=>card.id===id&&saved?saved:card)
+    if (!current?.serverId) return
+    const saved = fromServerCard(await apiFetch<any>(`/api/leagues/${CHAOS_LEAGUE_ID}/cards/${current.serverId}/status`,{method:'POST',body:JSON.stringify({status})}))
+    const next = uploadedCards.map(card=>card.id===id?saved:card)
     localStorage.setItem('chaos-uploaded-cards',JSON.stringify(next)); setUploadedCards(next)
   }
   const deleteUploadedCard = (id: number) => {
@@ -257,13 +243,13 @@ export default function App() {
     localStorage.setItem('chaos-permission-grants',JSON.stringify(next)); setPermissionGrants(next)
   }
   const saveRosterAssignment = async (team: Team, email: string) => {
-    let saved: RosterAssignment = { rosterId:team.id, sleeperUserId:team.sleeperUserId || String(team.id), sleeperManagerName:team.manager, sleeperTeamName:team.name, fantasyToolsEmail:email.trim(), fantasyToolsName:email.trim() }
-    if (getToken()) saved = await apiFetch<RosterAssignment>(`/api/leagues/${CHAOS_LEAGUE_ID}/rosters/${team.id}`,{method:'PUT',body:JSON.stringify(saved)})
+    const requested: RosterAssignment = { rosterId:team.id, sleeperUserId:team.sleeperUserId || String(team.id), sleeperManagerName:team.manager, sleeperTeamName:team.name, fantasyToolsEmail:email.trim(), fantasyToolsName:email.trim() }
+    const saved = await apiFetch<RosterAssignment>(`/api/leagues/${CHAOS_LEAGUE_ID}/rosters/${team.id}`,{method:'PUT',body:JSON.stringify(requested)})
     const next = [...rosterAssignments.filter(item=>item.rosterId!==team.id && item.fantasyToolsUserId!==saved.fantasyToolsUserId),saved]
     setRosterAssignments(next); localStorage.setItem('chaos-roster-assignments',JSON.stringify(next))
   }
   const removeRosterAssignment = async (team: Team) => {
-    if (getToken()) await apiFetch(`/api/leagues/${CHAOS_LEAGUE_ID}/rosters/${team.id}`,{method:'DELETE'})
+    await apiFetch(`/api/leagues/${CHAOS_LEAGUE_ID}/rosters/${team.id}`,{method:'DELETE'})
     const next=rosterAssignments.filter(item=>item.rosterId!==team.id); setRosterAssignments(next); localStorage.setItem('chaos-roster-assignments',JSON.stringify(next))
   }
 
@@ -327,14 +313,8 @@ export default function App() {
     }
   }
 
-  if (screen === 'login') return <main className="login-screen">
-    <div className="noise" />
-    <section className="login-copy"><div className="eyebrow">FANTASY FOOTBALL, UNHINGED</div><h1>CHAOS<br/><span>CARDS</span></h1><p>Your fantasy league is already a battle. Now bring weapons.</p><div className="login-cards"><ChaosCard card={cards[0]} compact/><ChaosCard card={cards[2]} compact/><ChaosCard card={cards[1]} compact/></div></section>
-    <section className="login-panel"><div className="logo-mark">CC</div><h2>Enter the League Room</h2><p>Use the demo manager to experience Week 1 before cards lock.</p><label>MANAGER EMAIL<input defaultValue="matthew@chaos.demo" /></label><label>PASSWORD<input type="password" defaultValue="chaoscards" /></label><button className="primary" onClick={() => setScreen('room')}>ENTER THE CHAOS <span>→</span></button><small>WEEK 1 DEMO · REAL TEAMS · MOCK SCORES</small></section>
-  </main>
-
   return <div className="app-shell">
-    <header><button className="brand" onClick={() => {setScreen('room');setActiveNav('League Room')}}><b>CC</b><span>CHAOS CARDS<small>FANTASY FOOTBALL</small></span></button><nav>{['League Room','Standings','Card Library','History'].map(n => <button className={activeNav===n?'active':''} onClick={() => {setActiveNav(n); setScreen(n==='Card Library'?'library':'room')}} key={n}>{n}</button>)}</nav><div className="admin-actions"><button className="admin-link roster-link" onClick={()=>{setScreen('rosters');setActiveNav('')}}>⇄ ROSTERS</button><button className="admin-link" onClick={()=>{setScreen('permissions');setActiveNav('')}}>♛ COMMISSIONERS</button><button className="admin-link" onClick={()=>{setScreen('admin');setActiveNav('')}}>⚙ CARD CREATOR</button></div><div className="week"><span>WEEK 1</span><b className={revealed?'':'preweek'}>{revealed?'REVEALED':'PRE-WEEK'}</b></div><TeamBadge team={home} small /></header>
+    <header><button className="brand" onClick={() => {setScreen('room');setActiveNav('League Room')}}><b>CC</b><span>CHAOS CARDS<small>FANTASY FOOTBALL</small></span></button><nav>{['League Room','Standings','Card Library','History'].map(n => <button className={activeNav===n?'active':''} onClick={() => {setActiveNav(n); setScreen(n==='Card Library'?'library':'room')}} key={n}>{n}</button>)}</nav><div className="admin-actions"><button className="admin-link roster-link" onClick={()=>{setScreen('rosters');setActiveNav('')}}>⇄ ROSTERS</button><button className="admin-link commissioner-link" onClick={()=>{setScreen('permissions');setActiveNav('')}}>♛ COMMISSIONERS</button><button className="admin-link creator-link" onClick={()=>{setScreen('admin');setActiveNav('')}}>⚙ CARD CREATOR</button><button className="admin-link signout-link" title={account?.email} onClick={logout}>Sign out</button></div><div className="week"><span>WEEK 1</span><b className={revealed?'':'preweek'}>{revealed?'REVEALED':'PRE-WEEK'}</b></div><TeamBadge team={home} small /></header>
     {screen === 'rosters' ? <RosterAssignments teams={teamData} assignments={rosterAssignments} onSave={saveRosterAssignment} onRemove={removeRosterAssignment}/> : screen === 'permissions' ? <CommissionerAccess teams={teamData} grants={permissionGrants} onChange={updatePermissionGrants}/> : screen === 'admin' ? <CardCreator initialCard={editingCard} onSave={saveUploadedCard} onCancel={()=>{setEditingCard(null);setScreen('library');setActiveNav('Card Library')}}/> : screen === 'library' ? <SharedCardLibrary uploaded={uploadedCards} onCreate={()=>{setEditingCard(null);setScreen('admin');setActiveNav('')}} onEdit={card=>{setEditingCard(card);setScreen('admin');setActiveNav('')}} onStatus={updateCardStatus} onDelete={deleteUploadedCard}/> : screen === 'room' ? <main className="room">
       <section className="room-hero"><div><div className="eyebrow">{leagueName} · WEEK 1 DEMO</div><h1>League Room</h1><p>{sleeperStatus === 'live' ? 'REAL SLEEPER TEAMS · DEMO MATCHUPS AND SCORES' : sleeperStatus === 'loading' ? 'IMPORTING YOUR SLEEPER MANAGERS…' : 'SLEEPER IMPORT BLOCKED HERE · SHOWING DEMO NAMES'}</p></div><div className="deadline"><span>THURSDAY CARD LOCK</span><strong>{revealed ? 'CARDS REVEALED' : '02 : 14 : 36'}</strong><button onClick={toggleReveal}>{revealed ? 'RESET TO PRE-WEEK' : 'COMMISSIONER: LOCK & REVEAL'}</button></div></section>
       <div className="ticker"><b>LIVE CHAOS</b><span>⚡ Stephen played CRUSHING BLOW</span><span>•</span><span>Jordan’s score jumps +7.5</span><span>•</span><span>🛡 LOCKDOWN activated</span></div>

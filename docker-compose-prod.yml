@@ -35,15 +35,22 @@ services:
       - R2_SECRET_KEY=${FF_R2_SECRET_KEY}
       - R2_BUCKET=${FF_R2_BUCKET}
 
+      # Card artwork goes to its own public-read bucket, reusing the R2 credentials above.
+      # IMAGES_BASE_URL is the host bound to that bucket -- uploaded URLs are built from it.
+      - IMAGE_SERVICE=${FF_IMAGE_SERVICE}
+      - IMAGES_FOLDER=${FF_IMAGES_FOLDER}
+      - IMAGES_BUCKET=${FF_IMAGES_BUCKET}
+      - IMAGES_BASE_URL=${FF_IMAGES_BASE_URL}
+
       # TURNSTILE_ENABLED is deliberately not mapped. Only the literal "false" disables the captcha,
       # so leaving it unset is the safe default and there is no way to typo it off in prod.
       - TURNSTILE_SITE_KEY=${FF_TURNSTILE_SITE_KEY}
       - TURNSTILE_SECRET_KEY=${FF_TURNSTILE_SECRET_KEY}
 
-      - MAILERSEND_API_KEY=${FF_MAILERSEND_API_KEY}
+      - RESEND_API_KEY=${FF_RESEND_API_KEY}
       - MAIL_FROM_EMAIL=${FF_MAIL_FROM_EMAIL}
       - MAIL_FROM_NAME=${FF_MAIL_FROM_NAME}
-      - MAIL_TRANSPORT=${FF_MAIL_TRANSPORT:-mailersend}
+      - MAIL_TRANSPORT=${FF_MAIL_TRANSPORT:-resend}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 10s

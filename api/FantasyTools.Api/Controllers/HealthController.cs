@@ -7,7 +7,7 @@ namespace FantasyTools.Api.Controllers;
 /// Liveness target for the container healthcheck and Traefik.
 /// </summary>
 /// <remarks>
-/// Deliberately checks nothing downstream. A readiness probe that reaches R2 or MailerSend turns a
+/// Deliberately checks nothing downstream. A readiness probe that reaches R2 or Resend turns a
 /// third-party blip into Docker killing a process that is serving requests perfectly well.
 /// </remarks>
 [ApiController]

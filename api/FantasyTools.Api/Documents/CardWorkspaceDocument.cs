@@ -24,7 +24,10 @@ public class CardDraftDocument
     public string Category { get; set; }
     public string Rarity { get; set; }
     public bool IsSpecial { get; set; }
-    public string ArtworkDataUrl { get; set; }
+
+    /// <summary>Where the finished card image lives -- an images-host URL, or an /api/images path locally.</summary>
+    public string ArtworkUrl { get; set; }
+
     public string OfficialDescription { get; set; }
     public string CommissionerNotes { get; set; }
     public string Target { get; set; }

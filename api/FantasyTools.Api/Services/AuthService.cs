@@ -50,11 +50,13 @@ public class AuthService(
         }
 
         // Locked so two simultaneous signups for the same address cannot both pass the existence check.
-        var created = await WithUserLock(email, async () =>
+        var outcome = await WithUserLock(email, async () =>
         {
-            if (await fileService.Retrieve(new UserDocument { Email = email }) != null)
+            var existing = await fileService.Retrieve(new UserDocument { Email = email });
+
+            if (existing != null)
             {
-                return false;
+                return await Reissue(existing, request.Password);
             }
 
             var user = new UserDocument
@@ -70,13 +72,58 @@ public class AuthService(
 
             await IssueVerification(user);
 
-            return true;
+            return RegisterOutcome.Created;
         });
 
-        if (!created)
+        if (outcome == RegisterOutcome.AlreadyExists)
         {
             throw new ArgumentException("An account with that email already exists.");
         }
+    }
+
+    /// <summary>
+    /// Handles registering an address that already has an account. An unverified one is nearly always a
+    /// signup whose email never arrived -- the send can fail after the document is written, and the
+    /// document store has no transaction to roll that back -- so this re-sends for the same account
+    /// instead of leaving the person at a dead end.
+    /// </summary>
+    /// <remarks>
+    /// Two constraints make this safe to do:
+    ///
+    /// The password must already match. Otherwise anyone could trigger verification mail at an address
+    /// with a pending signup.
+    ///
+    /// The stored hash is never replaced. Letting a second registration set the password would mean a
+    /// stranger could re-register someone else's pending address, and the moment the real owner clicked
+    /// the link sitting in their own inbox, the account would be verified against the stranger's
+    /// password. The link is not the credential -- the hash on the document is.
+    /// </remarks>
+    private async Task<RegisterOutcome> Reissue(UserDocument existing, string password)
+    {
+        if (existing.EmailVerified || existing.PasswordHash == null)
+        {
+            return RegisterOutcome.AlreadyExists;
+        }
+
+        if (passwordHasher.VerifyHashedPassword(existing, existing.PasswordHash, password) == PasswordVerificationResult.Failed)
+        {
+            return RegisterOutcome.AlreadyExists;
+        }
+
+        // Same throttle the resend endpoint uses, so this cannot become an unmetered way to send mail
+        // at an address. The previous link is still live, so answering as if it had sent is honest.
+        if (existing.VerificationSentAt.HasValue
+            && DateTime.UtcNow - existing.VerificationSentAt.Value < ResendInterval)
+        {
+            logger.LogInformation("Throttled a re-registration resend for {Email}", existing.Email);
+            return RegisterOutcome.Reissued;
+        }
+
+        await IssueVerification(existing);
+
+        logger.LogInformation("Re-sent verification for the unverified account {Email}", existing.Email);
+
+        return RegisterOutcome.Reissued;
     }
 
     public async Task<(LoginOutcome, AuthResponseModel)> Login(LoginRequestModel request)
@@ -224,9 +271,23 @@ public class AuthService(
     }
 
     /// <summary>Mints a fresh token, persists only its hash, and emails the link.</summary>
+    /// <remarks>
+    /// The document has to be written before the send, or a link followed from a fast inbox could beat
+    /// its own token to storage. When the send then fails, that write is rolled back by hand -- there is
+    /// no transaction to do it, and the caller is always holding this account's lock.
+    ///
+    /// Rolling back matters twice over. Leaving the new timestamp would arm the resend throttle on a
+    /// message that never left, so the retry that is supposed to recover would answer "check your inbox"
+    /// with nothing behind it. Leaving the new hash would invalidate a working link from an earlier,
+    /// successful send in favour of one nobody ever received.
+    /// </remarks>
     private async Task IssueVerification(UserDocument user)
     {
         var token = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
+
+        var previousHash = user.VerificationTokenHash;
+        var previousExpiry = user.VerificationTokenExpiresAt;
+        var previousSentAt = user.VerificationSentAt;
 
         user.VerificationTokenHash = Hash(token);
         user.VerificationTokenExpiresAt = DateTime.UtcNow.Add(VerificationLifetime);
@@ -238,7 +299,21 @@ public class AuthService(
         var appUrl = (EnvironmentHelper.GetVar("APP_URL") ?? "http://localhost:5173").TrimEnd('/');
         var url = $"{appUrl}/verify?email={Uri.EscapeDataString(user.Email)}&token={Uri.EscapeDataString(token)}";
 
-        await emailService.SendVerification(user, url);
+        try
+        {
+            await emailService.SendVerification(user, url);
+        }
+        catch
+        {
+            user.VerificationTokenHash = previousHash;
+            user.VerificationTokenExpiresAt = previousExpiry;
+            user.VerificationSentAt = previousSentAt;
+            user.At = DateTime.UtcNow;
+
+            await fileService.Upsert(user);
+
+            throw;
+        }
     }
 
     /// <summary>Serializes read-modify-write on a single account. See <see cref="UserLocks"/>.</summary>

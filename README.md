@@ -43,24 +43,50 @@ Vite proxies `/api` to the API, so the browser stays on one origin — no CORS, 
 | GET | `/api/version` | anon | `{gitSha}` — the commit this image was built from, `unknown` outside a container |
 | GET | `/api/hello` | anon | `{ message: "Hello, world" }` |
 | GET | `/api/hello/secure` | bearer | `{ message: "Hello, {name}" }` |
-| POST | `/api/auth/register` | anon | `{email,name,password,turnstileToken}` → **204, no token** |
+| POST | `/api/auth/register` | anon | `{email,name,password,turnstileToken}` → **204, no token**; 503 if the mail could not be sent |
 | POST | `/api/auth/login` | anon | `{email,password,turnstileToken}` → `{token, user}` |
 | POST | `/api/auth/verify` | anon | `{email,token}` → 204, or 400 for a bad/expired link |
 | POST | `/api/auth/resend-verification` | anon | `{email,turnstileToken}` → always 204 |
 | GET | `/api/auth/me` | bearer | `{userId, email, name, emailVerified}` |
+| POST | `/api/images` | **bearer** | `multipart/form-data` with a `file` field → `{url}` |
+| GET | `/api/images/…` | anon | static files off the artwork folder — local mode only, see below |
 
 Auth is deliberately minimal: a `UserDocument` holding a `PasswordHasher<T>` (PBKDF2-SHA256) hash, and a
 7-day HS256 JWT signed with `JWT_SECRET`. No refresh tokens, no server-side sessions.
 
-Three response codes carry meaning and must not be collapsed into each other:
+Four response codes carry meaning and must not be collapsed into each other:
 
 - **401** on login — wrong password, or no such account. Deliberately the same answer for both.
 - **403** on login — password was right but the address is unverified. The UI keys off this to offer a resend.
 - **400** on verify — bad token, expired token, or unknown account. Identical for all three; since the
   token is unguessable, a failure reveals nothing about whether the address is registered.
+- **503** on register — the account was created but the verification email could not be sent. The
+  document is written before the send and there is no transaction to undo it, so this reports the truth
+  instead of a 500. Retrying the same form is the recovery: see below.
 
 `resend-verification` always answers 204 so it cannot be used to enumerate accounts, and is throttled to
-one email per account per 60 seconds.
+one email per account per 60 seconds. **It answers 204 even when the send fails** — a 503 there would
+only ever appear for an address that has an unverified account, which is precisely what the flat 204
+exists to hide. That failure goes to the log instead.
+
+### Re-registering an unverified address
+
+Registering an address that already has an **unverified** account is not treated as a duplicate. Given
+the correct password, it re-sends that account's link and answers 204. That is what makes a 503 above
+recoverable rather than a dead end where the retry says "an account with that email already exists".
+
+Two rules keep it safe:
+
+- **The password must already match.** Otherwise it becomes a way to send mail at a stranger's pending
+  address. A mismatch gets the ordinary "already exists" 400.
+- **The stored hash is never replaced.** If a second registration could set the password, someone could
+  re-register another person's pending address, and the moment the real owner clicked the link in their
+  own inbox the account would be verified against the stranger's password. The link is not the
+  credential — the hash on the document is.
+
+Once the address is verified it is a real duplicate again, right password or not. The same 60-second
+throttle applies, and a re-issue whose send fails rolls the document back so the throttle is not armed
+by a message that never left and an earlier working link is not invalidated by one nobody received.
 
 ## Email verification
 
@@ -69,13 +95,24 @@ followed. The token is 32 random bytes; only its SHA-256 hash is persisted, sinc
 bearer credential sitting in an inbox. Links expire after 24 hours and are idempotent, so a
 double-clicked or prefetched link succeeds twice rather than reporting itself broken.
 
-Mail goes through `IMailerSendService` from the Common package. `MAIL_TRANSPORT` picks the behaviour:
+Mail goes through [Resend](https://resend.com). `MAIL_TRANSPORT` picks the behaviour:
 
 | Value | Effect |
 |---|---|
-| `mailersend` | Sends for real. The default when `MAILERSEND_API_KEY` is set. |
+| `resend` | Sends for real. The default when `RESEND_API_KEY` is set. |
 | `outbox` | Writes the rendered message to `MAIL_OUTBOX_FOLDER` instead. The default with no API key. |
 | `both` | Sends and keeps a local copy. |
+
+Anything unrecognised falls back to the default rather than silently sending nothing.
+
+`MAIL_FROM_EMAIL` must be on a domain **verified in the Resend dashboard**. An unverified sender is a
+403 at send time, not a startup failure — so registration breaks for real users while every other part
+of the app stays healthy. The API logs Resend's own message on failure, which is why the send does not
+go through `HttpClientBase.Post`: `EnsureSuccessStatusCode` throws away the response body that names
+the reason.
+
+> The Common package still registers its MailerSend client, since it is shared with StockScreener.
+> Nothing here resolves `IMailerSendService`, and `MAILERSEND_API_KEY` is no longer read.
 
 `outbox` is what lets a fresh clone complete the whole verification loop with no mail credentials, and
 it is what the e2e suite reads to get the link.
@@ -117,6 +154,51 @@ run writes to disk. `DOCUMENTS_FOLDER` / `DOCUMENTS_FOLDER_LOCAL` set the root f
 > Requires **StephenWeaver.Common 1.1.0+**. In 1.0.0 the local folder was hardcoded to
 > `C:\StockWatch\Documents`, the `_LOCAL` convention was compiled out of the Release-built package, and an
 > empty `R2_CONNECTION_STRING=` crashed startup with `No RegionEndpoint or ServiceURL configured`.
+
+### Card artwork
+
+Card images are **not** stored in the card document. `POST /api/images` takes the file, stores it, and
+returns a URL; the card keeps only that URL. Uploading requires a bearer token — it is the one write
+path in the app that accepts arbitrary bytes, so it is never anonymous.
+
+Artwork follows the same R2-vs-disk split as documents, driven by its own variables:
+
+```
+IMAGE_SERVICE=R2                                        IMAGE_SERVICE_LOCAL=local
+IMAGES_FOLDER=cards                # R2 key prefix      IMAGES_FOLDER_LOCAL=C:\FantasyTools\Images
+IMAGES_BUCKET=fantasytools-images
+IMAGES_BASE_URL=https://images.fantasytools.stephenweaver.dev
+```
+
+`IMAGES_BUCKET` is a **second bucket**, separate from `R2_BUCKET` and public-read, because browsers
+fetch these objects directly off `IMAGES_BASE_URL` instead of through the API. The `R2_*` credentials
+are shared — only the bucket differs. It gets its own S3 client rather than going through
+`IFileService`, which is bound to one bucket and serializes documents to JSON.
+
+| Mode | Where bytes go | URL the card stores | Who serves it |
+|---|---|---|---|
+| `IMAGE_SERVICE=R2` | `IMAGES_BUCKET`, key `cards/<guid>.png` | `IMAGES_BASE_URL` + `/cards/<guid>.png` | the images host, directly |
+| anything else | `IMAGES_FOLDER` on disk | `/api/images/cards/<guid>.png` | static file middleware |
+
+**Nothing reads an image back through application code.** Locally the artwork folder is handed to
+ASP.NET's static file middleware at startup, mounted on `/api/images` — so reads get ETag,
+`If-None-Match` and range handling for free, and no caller-supplied string is ever turned into a file
+path. There is no read action on `ImagesController` to match the upload. (A `file://` URL is not an
+option: a page served over HTTP cannot load one.)
+
+The local URL is relative on purpose: the browser reaches the API through the Vite proxy in dev and
+the nginx `/api` proxy in prod, so it resolves in both without knowing either hostname. Mounting the
+folder under `/api` rather than `/images` is what makes both of those proxies work unchanged.
+
+Names are GUIDs, so a URL's content can never change and the middleware serves them `immutable`.
+
+Uploads are capped at 8 MB and limited to PNG, JPG, and WebP — the declared content type is checked
+against the file's magic bytes, since these objects are then served publicly under our own domain.
+`web/nginx.conf` raises `client_max_body_size` to 9 MB so the API's cap is the one that reports;
+nginx's own 1 MB default would answer first with an HTML error page.
+
+> A missing `IMAGES_*` variable with `IMAGE_SERVICE=R2` stops the API at **startup**, not on the first
+> upload — same choice as `FILE_SERVICE=R2` with an empty connection string.
 
 ## Deploying
 
@@ -249,8 +331,8 @@ cd web
 npx playwright test
 ```
 
-Covers register → blocked login → follow the emailed link → sign in → reload → sign out, plus duplicate
-email, bad password, a tampered verification link, and that a wrong password never offers the resend
-route (which would leak that the account exists).
+Covers register → blocked login → follow the emailed link → sign in → land in the league room → reload →
+sign out, plus duplicate email, bad password, a tampered verification link, and that a wrong password
+never offers the resend route (which would leak that the account exists).
 
 The captcha itself is not covered by these tests, for the reason above.

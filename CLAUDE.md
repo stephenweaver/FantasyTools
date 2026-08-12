@@ -80,7 +80,41 @@ But v3.3.5's docker provider cannot talk to Engine 29: it fails with a bare
 looks like the culprit. Upgrading the host's Docker means bumping Traefik first.
 
 `DOCUMENTS_FOLDER` in prod is an R2 key prefix on a Linux container. A Windows path there is taken
-literally.
+literally. **`IMAGES_FOLDER` is the same kind of value** and has the same trap.
+
+**Card artwork lives in a second R2 bucket** (`IMAGES_BUCKET`), public-read, reached by its own
+`AmazonS3Client` in `ImageStorageService`. It cannot go through `IFileService` — that is constructed
+against `R2_BUCKET` alone and only round-trips `BaseDocument` as JSON. The `R2_*` credentials are
+shared, so a new key pair has to be granted on both buckets or uploads start failing while documents
+keep working. `IMAGES_BASE_URL` is the public host bound to that bucket and is baked into every stored
+card: change the host and existing cards point at the old one, because the URL is persisted, not built
+at read time.
+
+**Local artwork is served by static file middleware, not a controller.** `Startup` mounts
+`IImageStorageService.LocalRoot` on the request path `/api/images`, and there is deliberately no read
+action on `ImagesController`. Two things depend on the `/api` prefix: the Vite proxy in dev and the
+nginx `/api` proxy in prod both forward on that prefix alone, so moving the mount to `/images` means
+editing both or the images 404 while uploads keep succeeding. Do not reintroduce a read endpoint —
+turning a route parameter back into a file path is exactly the code the middleware exists to avoid.
+
+**`web/nginx.conf` must keep `client_max_body_size` above the API's upload cap.** nginx defaults to 1 MB
+and rejects larger uploads itself, before the request reaches ASP.NET — the browser gets nginx's HTML
+error page instead of the API's message, which reads like the endpoint is broken rather than the file
+being too big. Nothing in dev catches this: Vite's proxy has no such limit.
+
+## Mail is Resend, not the Common package's MailerSend
+
+`ResendHttpClient` lives here; `RegisterStephenWeaverCommon` still wires up `IMailerSendService`
+because that package is shared with StockScreener, but nothing in this repo resolves it. Do not "tidy
+up" by routing mail back through it, and do not delete it from the package.
+
+The send does **not** use `HttpClientBase.Post`. Resend reports a rejected message as a 4xx whose body
+carries the reason, and `EnsureSuccessStatusCode` discards that body — leaving "one or more errors
+occurred" as the only trace of a sender domain that was never verified.
+
+`MAIL_FROM_EMAIL` must be on a domain verified in the Resend dashboard. That check happens at send
+time, so a bad value is a 403 on registration only — startup, `/health`, and every other route stay
+green. `MAIL_TRANSPORT=outbox` sidesteps it entirely, which is what the e2e profile does.
 
 ## The Common package lives in another repo
 
@@ -148,10 +182,51 @@ clear message as of 1.1.0; in 1.0.0 it crashed with `No RegionEndpoint or Servic
 - **401** on login — wrong password *or* unknown account. Same answer for both, deliberately.
 - **403** on login — correct password, unverified address. The UI keys off this to offer a resend.
 - **400** on verify — bad, expired, or unknown. Identical for all three.
+- **503** on register — account created, mail could not be sent. Not a 500: the retry is the recovery.
 - `resend-verification` always returns 204, throttled to one per account per 60s.
+
+**`resend-verification` must keep returning 204 when the send fails.** It is the one place a delivery
+failure cannot be reported, because a send is only attempted there for an address that has an unverified
+account — so a 503 would answer the question the flat 204 exists to refuse. `AuthController` swallows
+`EmailDeliveryException` there and logs it. Register is free to return 503 because it attempts a send in
+every non-duplicate case.
+
+**Re-registering an unverified address re-sends its link rather than reporting a duplicate**, but only
+when the supplied password already matches, and it never replaces the stored hash. Both rules are load
+bearing: without the first this sends mail at strangers' pending addresses; without the second, someone
+can re-register another person's pending address and own the account the moment the real owner clicks
+the link in their own inbox. The link is not the credential.
 
 Verification tokens are stored **hashed only**. Links are idempotent on purpose — mail clients prefetch
 them and users double-click. Never make a valid link fail on second use.
+
+**`IssueVerification` writes the document before sending and rolls it back by hand if the send throws.**
+The write has to come first or a link followed from a fast inbox beats its own token to storage. But
+leaving the write in place on failure arms the 60s throttle for a message that never left — so the retry
+that is meant to recover answers "check your inbox" with nothing behind it — and replaces a working link
+from an earlier successful send with one nobody received. There is no transaction; the caller holds the
+account lock, which is what makes the second write safe.
+
+## The app has no signed-out state of its own
+
+`App.tsx` renders only behind the gate in `main.tsx`, which redirects to `/login` whenever `user` is
+null — **including in dev**. It used to exempt `import.meta.env.DEV`, and the app carried a second,
+decorative login screen with the demo credentials prefilled that simply called `setScreen('room')`. The
+combination meant a local run looked signed in while holding no token, so every `[Authorize]` call
+quietly failed into `localStorage` and the UI reported success. Do not reintroduce either half.
+
+Consequently there is no `getToken()` guard around API calls in `App.tsx`, and there should not be:
+inside the app a token always exists, and a guard there converts an expired session into silent
+local-only writes instead of a visible error.
+
+All four signed-out pages share `lib/AuthShell.tsx` and are styled by the hand-written CSS in
+`index.css`. **Tailwind is installed but `index.css` never imports it**, so any `className="rounded
+border …"` is inert — that is what left the original auth pages unstyled. Style with the existing
+classes, or import Tailwind deliberately (its preflight will fight the existing CSS).
+
+The wordmark in `AuthShell` is a `div`, not an `h1`, so each page owns exactly one heading. The e2e
+suite addresses every auth page through `getByRole('heading')`, which is strict — a second heading
+anywhere in that shell fails the run on a match count, not on the text.
 
 ## Testing reality
 

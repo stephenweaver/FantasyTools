@@ -12,7 +12,9 @@ import './index.css'
 function LeagueApp() {
   const { user, loading } = useAuth()
   if (loading) return <div className="auth-loading">Loading FantasyTools…</div>
-  if (!user && !import.meta.env.DEV) return <Navigate to="/login" replace />
+  // No dev exemption. The app assumed a session it had not actually established, so every call that
+  // needs a bearer token failed silently into browser-local storage and looked like it had worked.
+  if (!user) return <Navigate to="/login" replace />
   return <App />
 }
 

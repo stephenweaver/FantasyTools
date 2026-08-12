@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
+import { AuthShell } from '../lib/AuthShell'
 
 type State = 'working' | 'done' | 'failed'
 
@@ -36,31 +37,26 @@ export default function Verify() {
   }, [email, token])
 
   if (state === 'working') {
-    return <div className="p-6 text-slate-600">Verifying…</div>
+    return <div className="auth-loading">Verifying…</div>
+  }
+
+  if (state === 'done') {
+    return (
+      <AuthShell title="Email verified" blurb="Your account is ready. You can sign in now.">
+        <Link className="primary" to="/login">Go to sign in <span>→</span></Link>
+      </AuthShell>
+    )
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-6">
-      {state === 'done' ? (
-        <>
-          <h1 className="text-2xl font-semibold">Email verified</h1>
-          <p className="text-slate-600">Your account is ready. You can sign in now.</p>
-        </>
-      ) : (
-        <>
-          <h1 className="text-2xl font-semibold">That link didn't work</h1>
-          <p className="text-slate-600">
-            It may have expired or already been used. Request a new one and try again.
-          </p>
-          <Link className="underline" to={`/check-email?email=${encodeURIComponent(email)}`}>
-            Send a new link
-          </Link>
-        </>
-      )}
-
-      <Link className="w-fit rounded bg-slate-900 px-3 py-2 text-white" to="/login">
-        Go to sign in
+    <AuthShell title="That link didn't work" blurb="It may have expired or already been used. Request a new one and try again.">
+      <Link className="primary" to={`/check-email?email=${encodeURIComponent(email)}`}>
+        Send a new link <span>→</span>
       </Link>
-    </div>
+
+      <p className="auth-footer">
+        <Link to="/login">Go to sign in</Link>
+      </p>
+    </AuthShell>
   )
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
+import { AuthShell } from '../lib/AuthShell'
 import { Turnstile } from '../lib/turnstile'
 
 export default function CheckEmail() {
@@ -34,34 +35,29 @@ export default function CheckEmail() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-6">
-      <h1 className="text-2xl font-semibold">Check your inbox</h1>
-
-      <p className="text-slate-600">
-        We sent a verification link to <span className="font-medium">{email || 'your email address'}</span>.
-        Click it to finish setting up your account. The link expires in 24 hours.
+    <AuthShell title="Check your inbox">
+      <p className="auth-body">
+        We sent a verification link to <b>{email || 'your email address'}</b>. Click it to finish setting
+        up your account. The link expires in 24 hours.
       </p>
 
-      <div className="flex flex-col gap-3 border-t border-slate-200 pt-4">
-        <p className="text-sm text-slate-600">Didn't get it?</p>
+      <div className="auth-resend">
+        <span className="eyebrow">DIDN'T GET IT?</span>
 
-        <Turnstile onToken={setCaptchaToken} resetSignal={resetSignal} />
+        <div className="auth-captcha">
+          <Turnstile onToken={setCaptchaToken} resetSignal={resetSignal} />
+        </div>
 
-        <button
-          className="w-fit rounded border border-slate-300 px-3 py-2 disabled:opacity-50"
-          type="button"
-          onClick={resend}
-          disabled={busy || !captchaToken || !email}
-        >
+        <button className="secondary" type="button" onClick={resend} disabled={busy || !captchaToken || !email}>
           {busy ? 'Sending…' : 'Resend email'}
         </button>
 
-        {status && <p className="text-sm text-slate-600">{status}</p>}
+        {status && <p className="auth-note">{status}</p>}
       </div>
 
-      <p className="text-sm text-slate-600">
-        <Link className="underline" to="/login">Back to sign in</Link>
+      <p className="auth-footer">
+        <Link to="/login">Back to sign in</Link>
       </p>
-    </div>
+    </AuthShell>
   )
 }

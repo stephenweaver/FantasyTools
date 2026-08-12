@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { AuthShell } from '../lib/AuthShell'
 import { useAuth } from '../lib/auth'
 import { Turnstile } from '../lib/turnstile'
 
@@ -33,54 +34,58 @@ export default function Register() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-6 p-6">
-      <h1 className="text-2xl font-semibold">Create an account</h1>
+    <AuthShell title="Create an account" blurb="Your commissioner connects this account to a Sleeper roster once your email is confirmed.">
+      <form onSubmit={submit}>
+        <label>
+          MANAGER EMAIL
+          <input
+            type="email"
+            placeholder="Email"
+            autoComplete="username"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </label>
 
-      <form onSubmit={submit} className="flex flex-col gap-3">
-        <input
-          className="rounded border border-slate-300 px-3 py-2"
-          type="email"
-          placeholder="Email"
-          autoComplete="username"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <input
-          className="rounded border border-slate-300 px-3 py-2"
-          type="text"
-          placeholder="Name"
-          autoComplete="name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <input
-          className="rounded border border-slate-300 px-3 py-2"
-          type="password"
-          placeholder="Password (8+ characters)"
-          autoComplete="new-password"
-          minLength={8}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+        <label>
+          DISPLAY NAME
+          <input
+            type="text"
+            placeholder="Name"
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </label>
 
-        <Turnstile onToken={setCaptchaToken} resetSignal={resetSignal} />
+        <label>
+          PASSWORD
+          <input
+            type="password"
+            placeholder="Password (8+ characters)"
+            autoComplete="new-password"
+            minLength={8}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </label>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="auth-captcha">
+          <Turnstile onToken={setCaptchaToken} resetSignal={resetSignal} />
+        </div>
 
-        <button
-          className="rounded bg-slate-900 px-3 py-2 text-white disabled:opacity-50"
-          type="submit"
-          disabled={busy || !captchaToken}
-        >
-          {busy ? 'Creating…' : 'Create account'}
+        {error && <div className="auth-error">⚠ {error}</div>}
+
+        <button className="primary" type="submit" disabled={busy || !captchaToken}>
+          {busy ? 'Creating…' : 'Create account'} <span>→</span>
         </button>
       </form>
 
-      <p className="text-sm text-slate-600">
-        Already have one? <Link className="underline" to="/login">Sign in</Link>
+      <p className="auth-footer">
+        Already have one? <Link to="/login">Sign in</Link>
       </p>
-    </div>
+    </AuthShell>
   )
 }

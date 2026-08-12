@@ -44,13 +44,13 @@ async function submitWhenCaptchaReady(page: Page, name: string) {
   await button.click()
 }
 
-async function registerVia(page: Page, email: string, name = 'E2E User') {
+async function registerVia(page: Page, email: string, name = 'E2E User', secret = password) {
   await page.goto('/register')
   await expect(page.getByRole('heading')).toHaveText('Create an account')
 
   await page.getByPlaceholder('Email').fill(email)
   await page.getByPlaceholder('Name').fill(name)
-  await page.getByPlaceholder('Password (8+ characters)').fill(password)
+  await page.getByPlaceholder('Password (8+ characters)').fill(secret)
 
   await submitWhenCaptchaReady(page, 'Create account')
 }
@@ -94,12 +94,14 @@ test.describe('register, verify, sign in', () => {
     await page.getByPlaceholder('Password').fill(password)
     await submitWhenCaptchaReady(page, 'Sign in')
 
-    await expect(page.getByRole('heading')).toHaveText('Hello, E2E User')
-    await expect(page.getByText(`Signed in as ${email}`)).toBeVisible()
+    // A real session now lands in the league room. There is no signed-out view inside the app and no
+    // dev exemption on the gate, so reaching this heading at all proves the token was accepted.
+    await expect(page.getByRole('heading')).toHaveText('League Room')
+    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveAttribute('title', email)
 
     // The session survives a reload.
     await page.reload()
-    await expect(page.getByRole('heading')).toHaveText('Hello, E2E User')
+    await expect(page.getByRole('heading')).toHaveText('League Room')
 
     await page.getByRole('button', { name: 'Sign out' }).click()
     await expect(page).toHaveURL(/\/login$/)
@@ -112,11 +114,22 @@ test.describe('register, verify, sign in', () => {
     await registerVia(page, email)
     await expect(page.getByRole('heading')).toHaveText('Check your inbox')
 
+    // Re-registering an address whose account exists but is UNVERIFIED is not a duplicate: with the
+    // right password it re-sends that account's link. This is the path out of a registration whose
+    // email failed to send -- the account is written before the send and cannot be rolled back.
     await registerVia(page, email)
+    await expect(page.getByRole('heading')).toHaveText('Check your inbox')
+
+    // A different password must not do that, or it becomes a way to send mail at a stranger's address.
+    await registerVia(page, email, 'E2E User', 'a-completely-different-password')
     await expect(page.getByText('An account with that email already exists.')).toBeVisible()
 
     await page.goto(readVerificationUrl(email))
     await expect(page.getByRole('heading')).toHaveText('Email verified')
+
+    // Once verified it is a real duplicate again, right password or not.
+    await registerVia(page, email)
+    await expect(page.getByText('An account with that email already exists.')).toBeVisible()
 
     await page.goto('/login')
     await page.getByPlaceholder('Email').fill(email)

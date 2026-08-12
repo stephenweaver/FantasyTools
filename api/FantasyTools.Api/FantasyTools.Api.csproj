@@ -8,6 +8,9 @@
 
   <ItemGroup>
     <PackageReference Include="StephenWeaver.Common" Version="1.1.0" />
+    <!-- Pinned to the version the Common package already resolves. Referenced directly because card
+         artwork goes to its own R2 bucket, which the Common file service does not reach. -->
+    <PackageReference Include="AWSSDK.S3" Version="3.7.415.21" />
     <PackageReference Include="DotNetEnv" Version="3.1.1" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.3" />
   </ItemGroup>

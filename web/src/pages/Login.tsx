@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ApiError } from '../lib/api'
+import { AuthShell } from '../lib/AuthShell'
 import { useAuth } from '../lib/auth'
 import { Turnstile } from '../lib/turnstile'
 
@@ -41,51 +42,52 @@ export default function Login() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-6 p-6">
-      <h1 className="text-2xl font-semibold">Sign in</h1>
+    <AuthShell title="Sign in" blurb="Enter the league room with the account your commissioner connected to your Sleeper roster.">
+      <form onSubmit={submit}>
+        <label>
+          MANAGER EMAIL
+          <input
+            type="email"
+            placeholder="Email"
+            autoComplete="username"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </label>
 
-      <form onSubmit={submit} className="flex flex-col gap-3">
-        <input
-          className="rounded border border-slate-300 px-3 py-2"
-          type="email"
-          placeholder="Email"
-          autoComplete="username"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <input
-          className="rounded border border-slate-300 px-3 py-2"
-          type="password"
-          placeholder="Password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+        <label>
+          PASSWORD
+          <input
+            type="password"
+            placeholder="Password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </label>
 
-        <Turnstile onToken={setCaptchaToken} resetSignal={resetSignal} />
+        <div className="auth-captcha">
+          <Turnstile onToken={setCaptchaToken} resetSignal={resetSignal} />
+        </div>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <div className="auth-error">⚠ {error}</div>}
 
         {unverified && (
-          <Link className="text-sm underline" to={`/check-email?email=${encodeURIComponent(email)}`}>
+          <Link className="auth-link" to={`/check-email?email=${encodeURIComponent(email)}`}>
             Resend the verification email
           </Link>
         )}
 
-        <button
-          className="rounded bg-slate-900 px-3 py-2 text-white disabled:opacity-50"
-          type="submit"
-          disabled={busy || !captchaToken}
-        >
-          {busy ? 'Signing in…' : 'Sign in'}
+        <button className="primary" type="submit" disabled={busy || !captchaToken}>
+          {busy ? 'Signing in…' : 'Sign in'} <span>→</span>
         </button>
       </form>
 
-      <p className="text-sm text-slate-600">
-        No account? <Link className="underline" to="/register">Create one</Link>
+      <p className="auth-footer">
+        No account? <Link to="/register">Create one</Link>
       </p>
-    </div>
+    </AuthShell>
   )
 }

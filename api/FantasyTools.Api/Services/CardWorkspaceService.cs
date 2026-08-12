@@ -109,25 +109,34 @@ public class CardWorkspaceService(IFileService fileService) : ICardWorkspaceServ
 
     private static void Validate(SaveCardDraftRequest request, bool review)
     {
-        if (string.IsNullOrWhiteSpace(request.Name) && string.IsNullOrWhiteSpace(request.ArtworkDataUrl)) throw new ArgumentException("A working name or artwork is required.");
-        if (request.ArtworkDataUrl?.Length > 4_200_000) throw new ArgumentException("Artwork must be smaller than 3 MB.");
-        if (!string.IsNullOrEmpty(request.ArtworkDataUrl) && !request.ArtworkDataUrl.StartsWith("data:image/")) throw new ArgumentException("Artwork must be a PNG, JPG, or WebP data URL.");
-        if (review && (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.ArtworkDataUrl) || string.IsNullOrWhiteSpace(request.OfficialDescription))) throw new ArgumentException("Name, artwork, and completed rules are required for review.");
+        if (string.IsNullOrWhiteSpace(request.Name) && string.IsNullOrWhiteSpace(request.ArtworkUrl)) throw new ArgumentException("A working name or artwork is required.");
+        if (!IsUploadedArtwork(request.ArtworkUrl)) throw new ArgumentException("Artwork must be uploaded through POST /api/images before the card is saved.");
+        if (review && (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.ArtworkUrl) || string.IsNullOrWhiteSpace(request.OfficialDescription))) throw new ArgumentException("Name, artwork, and completed rules are required for review.");
         if (request.Copies is < 1 or > 99) throw new ArgumentException("Deck copies must be between 1 and 99.");
     }
+
+    /// <summary>
+    /// Artwork reaches the card as a URL from the upload endpoint, never as the image itself -- the whole
+    /// point of the images bucket is that a card document stays small enough to read on every request.
+    /// </summary>
+    private static bool IsUploadedArtwork(string artwork) =>
+        string.IsNullOrEmpty(artwork)
+        || artwork.StartsWith("/api/images/")
+        || artwork.StartsWith("https://")
+        || artwork.StartsWith("http://");
 
     private static void ValidateActive(CardDraftDocument card)
     {
         if (card.Status != "NEEDS REVIEW") throw new InvalidOperationException("Only a card awaiting review can be activated.");
-        if (string.IsNullOrWhiteSpace(card.ArtworkDataUrl) || string.IsNullOrWhiteSpace(card.OfficialDescription)) throw new InvalidOperationException("Artwork and complete rules are required before activation.");
+        if (string.IsNullOrWhiteSpace(card.ArtworkUrl) || string.IsNullOrWhiteSpace(card.OfficialDescription)) throw new InvalidOperationException("Artwork and complete rules are required before activation.");
     }
 
     private static CardDraftDocument Build(SaveCardDraftRequest request, string id, string creator, string editorName, DateTime createdAt, DateTime updatedAt) => new()
     {
         Id = id, Name = request.Name?.Trim() ?? "Untitled card idea", Category = request.Category ?? "ATTACK", Rarity = request.Rarity ?? "Common",
-        IsSpecial = request.IsSpecial, ArtworkDataUrl = request.ArtworkDataUrl, OfficialDescription = request.OfficialDescription?.Trim() ?? "", CommissionerNotes = request.CommissionerNotes?.Trim() ?? "",
+        IsSpecial = request.IsSpecial, ArtworkUrl = request.ArtworkUrl, OfficialDescription = request.OfficialDescription?.Trim() ?? "", CommissionerNotes = request.CommissionerNotes?.Trim() ?? "",
         Target = request.Target, EffectType = request.EffectType, Amount = request.Amount, Copies = request.Copies, SourcePlayer = request.SourcePlayer, SourcePlayerId = request.SourcePlayerId,
-        DestinationSlot = request.DestinationSlot, Multiplier = request.Multiplier, Status = request.SubmitForReview ? "NEEDS REVIEW" : string.IsNullOrWhiteSpace(request.ArtworkDataUrl) ? "IDEA" : "ARTWORK READY",
+        DestinationSlot = request.DestinationSlot, Multiplier = request.Multiplier, Status = request.SubmitForReview ? "NEEDS REVIEW" : string.IsNullOrWhiteSpace(request.ArtworkUrl) ? "IDEA" : "ARTWORK READY",
         CreatedByUserId = creator, UpdatedByUserId = creator, UpdatedByName = editorName, CreatedAt = createdAt, UpdatedAt = updatedAt
     };
 
