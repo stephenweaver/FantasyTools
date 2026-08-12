@@ -7,10 +7,10 @@ type Team = { id: number; manager: string; name: string; initials: string; recor
 type LineupPlayer = { name: string; position: string; nflTeam: string; opponent: string; game: string; projection: number; points: number; stats: string; status?: string }
 type RosterAssignment = { rosterId: number; sleeperUserId: string; sleeperManagerName: string; sleeperTeamName: string; fantasyToolsUserId?: string; fantasyToolsEmail: string; fantasyToolsName?: string }
 type RosterWorkspace = { primaryCommissionerUserId: string; assignments: RosterAssignment[] }
+type ChaosLeague = { leagueId: string; sleeperLeagueId: string; name: string; primaryCommissionerUserId: string; createdAt: string }
 type CardStatus = 'IDEA' | 'ARTWORK READY' | 'NEEDS REVIEW' | 'ACTIVE' | 'ARCHIVED'
 type UploadedCard = Card & { serverId?: string; artwork: string; rarity: string; copies: number; active: boolean; status: CardStatus; notes: string; updatedBy: string; updatedAt: string; effectType: string; special: boolean; sourcePlayer?: string; sourcePlayerId?: string; destinationSlot?: string; multiplier?: number }
 
-const CHAOS_LEAGUE_ID = '1301750882777456640'
 const fromServerCard = (card: any): UploadedCard => ({ id: Number(String(card.id).replace(/\D/g,'').slice(0,12)) || Date.now(), serverId: card.id, name: card.name, category: card.category, amount: card.amount, target: card.target, copy: card.officialDescription, icon: card.category === 'ATTACK' ? '⚡' : card.category === 'BOOST' ? '🔥' : '🛡', artwork: card.artworkUrl || '', rarity: card.rarity, copies: card.copies, active: card.status === 'ACTIVE', status: card.status, notes: card.commissionerNotes || '', updatedBy: card.updatedByName || 'Commissioner', updatedAt: card.updatedAt, effectType: card.effectType, special: card.isSpecial, sourcePlayer: card.sourcePlayer, sourcePlayerId: card.sourcePlayerId, destinationSlot: card.destinationSlot, multiplier: card.multiplier })
 const toServerCard = (card: UploadedCard, submitForReview: boolean) => ({ name: card.name, category: card.category, rarity: card.rarity, isSpecial: card.special, artworkUrl: card.artwork, officialDescription: card.copy, commissionerNotes: card.notes, target: card.target, effectType: card.effectType, amount: card.amount, copies: card.copies, sourcePlayer: card.sourcePlayer, sourcePlayerId: card.sourcePlayerId, destinationSlot: card.destinationSlot, multiplier: card.multiplier, submitForReview })
 
@@ -181,10 +181,10 @@ const commissionerPermissions = [
   ['manage_co_commissioners','Manage co-commissioners','Grant permissions to other managers. Primary only.'],
 ] as const
 
-function CommissionerAccess({ teams, grants, onChange }: { teams: Team[]; grants: Record<number,string[]>; onChange: (next: Record<number,string[]>) => void }) {
+function CommissionerAccess({ teams, grants, onChange, leagueId }: { teams: Team[]; grants: Record<number,string[]>; onChange: (next: Record<number,string[]>) => void; leagueId: string }) {
   const { user } = useAuth()
   const [workspace, setWorkspace] = useState<RosterWorkspace | null | undefined>(undefined)
-  useEffect(() => { apiFetch<RosterWorkspace>(`/api/leagues/${CHAOS_LEAGUE_ID}/rosters`).then(setWorkspace).catch(()=>setWorkspace(null)) }, [])
+  useEffect(() => { apiFetch<RosterWorkspace>(`/api/leagues/${leagueId}/rosters`).then(setWorkspace).catch(()=>setWorkspace(null)) }, [leagueId])
   const primaryRoster = workspace?.assignments.find(item=>item.fantasyToolsUserId===workspace.primaryCommissionerUserId)
   const primaryTeam = primaryRoster ? teams.find(team=>team.id===primaryRoster.rosterId) : undefined
   const viewerIsPrimary = Boolean(user?.userId && user.userId===workspace?.primaryCommissionerUserId)
@@ -209,9 +209,11 @@ function CommissionerAccess({ teams, grants, onChange }: { teams: Team[]; grants
   </main>
 }
 
-export default function App() {
+function LeagueGame({ league }: { league: ChaosLeague }) {
   // Only ever rendered behind the auth gate in main.tsx, so there is no signed-out screen here.
   const { user: account, logout } = useAuth()
+  const workspaceId = league.leagueId
+  const sleeperLeagueId = league.sleeperLeagueId
   const [screen, setScreen] = useState<'room' | 'battle' | 'admin' | 'library' | 'permissions' | 'rosters'>('room')
   const [selected, setSelected] = useState<number[]>([])
   const [played, setPlayed] = useState<Card[]>([])
@@ -238,11 +240,10 @@ export default function App() {
   const viewerIsPrimary = Boolean(account?.userId && account.userId === primaryCommissionerUserId)
 
   useEffect(() => {
-    const leagueId = '1301750882777456640'
     Promise.all([
-      fetch(`https://api.sleeper.app/v1/league/${leagueId}`).then(r => { if (!r.ok) throw new Error('League unavailable'); return r.json() }),
-      fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`).then(r => r.json()),
-      fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`).then(r => r.json()),
+      fetch(`https://api.sleeper.app/v1/league/${sleeperLeagueId}`).then(r => { if (!r.ok) throw new Error('League unavailable'); return r.json() }),
+      fetch(`https://api.sleeper.app/v1/league/${sleeperLeagueId}/users`).then(r => r.json()),
+      fetch(`https://api.sleeper.app/v1/league/${sleeperLeagueId}/rosters`).then(r => r.json()),
     ]).then(([league, users, rosters]) => {
       const imported = users.map((user: { user_id: string; display_name?: string; username?: string; metadata?: { team_name?: string } }, index: number) => {
         const manager = user.display_name || user.username || `Manager ${index + 1}`
@@ -255,25 +256,25 @@ export default function App() {
       setLeagueName(league.name || 'SLEEPER LEAGUE')
       setSleeperStatus('live')
     }).catch(() => setSleeperStatus('fallback'))
-  }, [])
+  }, [sleeperLeagueId])
 
   useEffect(() => {
-    apiFetch<{cards: any[]}>(`/api/leagues/${CHAOS_LEAGUE_ID}/cards`)
+    apiFetch<{cards: any[]}>(`/api/leagues/${workspaceId}/cards`)
       .then(workspace => {
         const shared = workspace.cards.map(fromServerCard)
         setUploadedCards(shared)
         localStorage.setItem('chaos-uploaded-cards',JSON.stringify(shared))
       })
       .catch(() => { /* The first saved draft creates the workspace. */ })
-    apiFetch<RosterWorkspace>(`/api/leagues/${CHAOS_LEAGUE_ID}/rosters`)
+    apiFetch<RosterWorkspace>(`/api/leagues/${workspaceId}/rosters`)
       .then(workspace => { setPrimaryCommissionerUserId(workspace.primaryCommissionerUserId); setRosterAssignments(workspace.assignments); localStorage.setItem('chaos-roster-assignments',JSON.stringify(workspace.assignments)) })
       .catch(() => { /* The commissioner starts setup from the roster screen. */ })
-  }, [])
+  }, [workspaceId])
 
   // The server is the record for every card mutation -- localStorage only mirrors the answer so a
   // reload paints something before the workspace request returns.
   const saveUploadedCard = async (card: UploadedCard) => {
-    const path = card.serverId ? `/api/leagues/${CHAOS_LEAGUE_ID}/cards/${card.serverId}` : `/api/leagues/${CHAOS_LEAGUE_ID}/cards`
+    const path = card.serverId ? `/api/leagues/${workspaceId}/cards/${card.serverId}` : `/api/leagues/${workspaceId}/cards`
     const saved = fromServerCard(await apiFetch<any>(path,{method:card.serverId?'PUT':'POST',body:JSON.stringify(toServerCard(card,card.status==='NEEDS REVIEW'))}))
     const next = uploadedCards.some(existing=>existing.id===card.id) ? uploadedCards.map(existing=>existing.id===card.id?saved:existing) : [...uploadedCards, saved]
     localStorage.setItem('chaos-uploaded-cards', JSON.stringify(next)); setUploadedCards(next); setScreen('library'); setActiveNav('Card Library')
@@ -281,7 +282,7 @@ export default function App() {
   const updateCardStatus = async (id: number, status: CardStatus) => {
     const current = uploadedCards.find(card=>card.id===id)
     if (!current?.serverId) return
-    const saved = fromServerCard(await apiFetch<any>(`/api/leagues/${CHAOS_LEAGUE_ID}/cards/${current.serverId}/status`,{method:'POST',body:JSON.stringify({status})}))
+    const saved = fromServerCard(await apiFetch<any>(`/api/leagues/${workspaceId}/cards/${current.serverId}/status`,{method:'POST',body:JSON.stringify({status})}))
     const next = uploadedCards.map(card=>card.id===id?saved:card)
     localStorage.setItem('chaos-uploaded-cards',JSON.stringify(next)); setUploadedCards(next)
   }
@@ -295,12 +296,12 @@ export default function App() {
   }
   const saveRosterAssignment = async (team: Team, email: string) => {
     const requested: RosterAssignment = { rosterId:team.id, sleeperUserId:team.sleeperUserId || String(team.id), sleeperManagerName:team.manager, sleeperTeamName:team.name, fantasyToolsEmail:email.trim(), fantasyToolsName:email.trim() }
-    const saved = await apiFetch<RosterAssignment>(`/api/leagues/${CHAOS_LEAGUE_ID}/rosters/${team.id}`,{method:'PUT',body:JSON.stringify(requested)})
+    const saved = await apiFetch<RosterAssignment>(`/api/leagues/${workspaceId}/rosters/${team.id}`,{method:'PUT',body:JSON.stringify(requested)})
     const next = [...rosterAssignments.filter(item=>item.rosterId!==team.id && item.fantasyToolsUserId!==saved.fantasyToolsUserId),saved]
     setRosterAssignments(next); localStorage.setItem('chaos-roster-assignments',JSON.stringify(next))
   }
   const removeRosterAssignment = async (team: Team) => {
-    await apiFetch(`/api/leagues/${CHAOS_LEAGUE_ID}/rosters/${team.id}`,{method:'DELETE'})
+    await apiFetch(`/api/leagues/${workspaceId}/rosters/${team.id}`,{method:'DELETE'})
     const next=rosterAssignments.filter(item=>item.rosterId!==team.id); setRosterAssignments(next); localStorage.setItem('chaos-roster-assignments',JSON.stringify(next))
   }
 
@@ -366,7 +367,7 @@ export default function App() {
 
   return <div className="app-shell">
     <header><button className="brand" onClick={() => {setScreen('room');setActiveNav('League Room')}}><b>CC</b><span>CHAOS CARDS<small>FANTASY FOOTBALL</small></span></button><nav>{['League Room','Standings','Card Library','History'].map(n => <button className={activeNav===n?'active':''} onClick={() => {setActiveNav(n); setScreen(n==='Card Library'?'library':'room')}} key={n}>{n}</button>)}</nav><div className="admin-actions"><button className="admin-link roster-link" onClick={()=>{setScreen('rosters');setActiveNav('')}}>⇄ ROSTERS</button><button className="admin-link commissioner-link" onClick={()=>{setScreen('permissions');setActiveNav('')}}>♛ COMMISSIONERS</button><button className="admin-link creator-link" onClick={()=>{setScreen('admin');setActiveNav('')}}>⚙ CARD CREATOR</button><button className="admin-link signout-link" title={account?.email} onClick={logout}>Sign out</button></div><div className="week"><span>WEEK 1</span><b className={revealed?'':'preweek'}>{revealed?'REVEALED':'PRE-WEEK'}</b></div><TeamBadge team={home} small /></header>
-    {screen === 'rosters' ? <RosterAssignments teams={teamData} assignments={rosterAssignments} onSave={saveRosterAssignment} onRemove={removeRosterAssignment}/> : screen === 'permissions' ? <CommissionerAccess teams={teamData} grants={permissionGrants} onChange={updatePermissionGrants}/> : screen === 'admin' ? <CardCreator initialCard={editingCard} onSave={saveUploadedCard} onCancel={()=>{setEditingCard(null);setScreen('library');setActiveNav('Card Library')}}/> : screen === 'library' ? <SharedCardLibrary uploaded={uploadedCards} onCreate={()=>{setEditingCard(null);setScreen('admin');setActiveNav('')}} onEdit={card=>{setEditingCard(card);setScreen('admin');setActiveNav('')}} onStatus={updateCardStatus} onDelete={deleteUploadedCard}/> : screen === 'room' ? <main className="room">
+    {screen === 'rosters' ? <RosterAssignments teams={teamData} assignments={rosterAssignments} onSave={saveRosterAssignment} onRemove={removeRosterAssignment}/> : screen === 'permissions' ? <CommissionerAccess teams={teamData} grants={permissionGrants} onChange={updatePermissionGrants} leagueId={workspaceId}/> : screen === 'admin' ? <CardCreator initialCard={editingCard} onSave={saveUploadedCard} onCancel={()=>{setEditingCard(null);setScreen('library');setActiveNav('Card Library')}}/> : screen === 'library' ? <SharedCardLibrary uploaded={uploadedCards} onCreate={()=>{setEditingCard(null);setScreen('admin');setActiveNav('')}} onEdit={card=>{setEditingCard(card);setScreen('admin');setActiveNav('')}} onStatus={updateCardStatus} onDelete={deleteUploadedCard}/> : screen === 'room' ? <main className="room">
       <section className="room-hero"><div><div className="eyebrow">{leagueName} · WEEK 1 DEMO</div><h1>League Room</h1><p>{sleeperStatus === 'live' ? 'REAL SLEEPER TEAMS · DEMO MATCHUPS AND SCORES' : sleeperStatus === 'loading' ? 'IMPORTING YOUR SLEEPER MANAGERS…' : 'SLEEPER IMPORT BLOCKED HERE · SHOWING DEMO NAMES'}</p></div><div className="deadline"><span>THURSDAY CARD LOCK</span><strong>{revealed ? 'CARDS REVEALED' : '02 : 14 : 36'}</strong><button onClick={toggleReveal}>{revealed ? 'RESET TO PRE-WEEK' : 'COMMISSIONER: LOCK & REVEAL'}</button></div></section>
       <div className="ticker"><b>LIVE CHAOS</b><span>⚡ Stephen played CRUSHING BLOW</span><span>•</span><span>Jordan’s score jumps +7.5</span><span>•</span><span>🛡 LOCKDOWN activated</span></div>
       <section className="matchup-grid">{[0,2,4,6,8].map((i, index) => { const a=teamData[i], b=teamData[i+1]; if (!a || !b) return null; return <article className={`matchup ${index===0?'featured':''}`} key={a.id} onClick={() => {setActiveMatchup(index);setScreen('battle')}}>
@@ -398,4 +399,60 @@ export default function App() {
       {toast && <div className="toast">⚡ {toast}</div>}
     </main>}
   </div>
+}
+
+function LeagueOnboarding({ onCreated }: { onCreated: (league: ChaosLeague) => void }) {
+  const { user, logout } = useAuth()
+  const [sleeperLeagueId, setSleeperLeagueId] = useState('')
+  const [preview, setPreview] = useState<{ name: string; totalRosters?: number } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const review = async () => {
+    const id = sleeperLeagueId.trim()
+    if (!/^\d+$/.test(id)) { setError('Enter the numeric league ID from your Sleeper league URL.'); return }
+    setBusy(true); setError(''); setPreview(null)
+    try {
+      const response = await fetch(`https://api.sleeper.app/v1/league/${id}`)
+      if (!response.ok) throw new Error('Sleeper could not find that league.')
+      const league = await response.json()
+      setPreview({ name: league.name || 'Sleeper League', totalRosters: league.total_rosters })
+    } catch (ex) { setError((ex as Error).message) }
+    finally { setBusy(false) }
+  }
+
+  const create = async () => {
+    if (!preview) return
+    setBusy(true); setError('')
+    try {
+      const league = await apiFetch<ChaosLeague>('/api/chaos-leagues', { method:'POST', body:JSON.stringify({ sleeperLeagueId:sleeperLeagueId.trim(), name:preview.name }) })
+      onCreated(league)
+    } catch (ex) { setError((ex as Error).message) }
+    finally { setBusy(false) }
+  }
+
+  return <main className="league-onboarding">
+    <div className="onboarding-brand"><b>CC</b><span>CHAOS CARDS<small>FANTASY FOOTBALL</small></span></div>
+    <section className="onboarding-card">
+      <div className="eyebrow">WELCOME, {user?.name || 'COMMISSIONER'}</div>
+      <h1>Create Your Chaos League</h1>
+      <p>Connect an existing Sleeper league. The FantasyTools account creating it becomes the primary commissioner automatically.</p>
+      <div className="owner-confirmation"><span>PRIMARY COMMISSIONER</span><b>{user?.email}</b><small>You can appoint co-commissioners after setup.</small></div>
+      <label>SLEEPER LEAGUE ID<input value={sleeperLeagueId} onChange={event=>{setSleeperLeagueId(event.target.value);setPreview(null)}} placeholder="Example: 1301750882777456640" inputMode="numeric" /></label>
+      <small className="id-help">Find this number at the end of your Sleeper league’s web address.</small>
+      {!preview&&<button className="primary onboarding-action" disabled={busy} onClick={review}>{busy?'CHECKING SLEEPER…':'FIND MY SLEEPER LEAGUE →'}</button>}
+      {preview&&<div className="league-preview"><span>LEAGUE FOUND</span><h2>{preview.name}</h2><p>{preview.totalRosters || '—'} Sleeper rosters</p><button className="primary onboarding-action" disabled={busy} onClick={create}>{busy?'CREATING LEAGUE…':'CREATE CHAOS CARDS LEAGUE →'}</button><button className="secondary" onClick={()=>setPreview(null)}>USE A DIFFERENT ID</button></div>}
+      {error&&<div className="form-error">⚠ {error}</div>}
+      <button className="onboarding-signout" onClick={logout}>Sign out and use a different account</button>
+    </section>
+    <aside className="join-note"><b>JOINING SOMEONE ELSE’S LEAGUE?</b><span>Your commissioner will send an invitation after creating the league.</span></aside>
+  </main>
+}
+
+export default function App() {
+  const [league, setLeague] = useState<ChaosLeague | null | undefined>(undefined)
+  useEffect(() => { apiFetch<ChaosLeague>('/api/chaos-leagues/current').then(setLeague).catch(()=>setLeague(null)) }, [])
+  if (league === undefined) return <main className="league-onboarding"><div className="onboarding-loading">LOADING YOUR CHAOS LEAGUE…</div></main>
+  if (league === null) return <LeagueOnboarding onCreated={setLeague}/>
+  return <LeagueGame league={league}/>
 }
