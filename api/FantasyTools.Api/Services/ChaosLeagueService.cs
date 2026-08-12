@@ -49,4 +49,7 @@ public class ChaosLeagueService(IFileService fileService) : IChaosLeagueService
         }
         finally { gate.Release(); }
     }
+
+    public async Task<ChaosLeagueDocument> GetInvite(string leagueId) => await fileService.Retrieve(new ChaosLeagueDocument { LeagueId=leagueId }) ?? throw new KeyNotFoundException("Invitation not found.");
+    public async Task Join(string userId, string leagueId) { await GetInvite(leagueId); await fileService.Upsert(new UserChaosLeagueDocument { UserId=userId, LeagueId=leagueId, At=DateTime.UtcNow }); }
 }

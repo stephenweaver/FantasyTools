@@ -7,4 +7,6 @@ public interface IChaosLeagueService
 {
     Task<ChaosLeagueDocument> GetCurrent(string userId);
     Task<ChaosLeagueDocument> Create(string userId, CreateChaosLeagueRequest request);
+    Task<ChaosLeagueDocument> GetInvite(string leagueId);
+    Task Join(string userId, string leagueId);
 }
