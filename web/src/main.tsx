@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import App from './App'
 import { AuthProvider, useAuth } from './lib/auth'
 import Login from './pages/Login'
@@ -11,10 +11,11 @@ import './index.css'
 
 function LeagueApp() {
   const { user, loading } = useAuth()
+  const location=useLocation()
   if (loading) return <div className="auth-loading">Loading FantasyTools…</div>
   // No dev exemption. The app assumed a session it had not actually established, so every call that
   // needs a bearer token failed silently into browser-local storage and looked like it had worked.
-  if (!user) return <Navigate to="/login" replace />
+  if (!user) return <Navigate to={`/login?returnUrl=${encodeURIComponent(location.pathname+location.search)}`} replace />
   return <App />
 }
 

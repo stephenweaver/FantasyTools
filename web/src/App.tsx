@@ -6,7 +6,8 @@ import { cards, ChaosCard, type Card, type Category } from './lib/cards'
 type Team = { id: number; manager: string; name: string; initials: string; record: string; score: number; chaos: number; hand: number; accent: string; sleeperUserId?: string }
 type LineupPlayer = { name: string; position: string; nflTeam: string; opponent: string; game: string; projection: number; points: number; stats: string; status?: string }
 type RosterAssignment = { rosterId: number; sleeperUserId: string; sleeperManagerName: string; sleeperTeamName: string; fantasyToolsUserId?: string; fantasyToolsEmail: string; fantasyToolsName?: string }
-type RosterWorkspace = { primaryCommissionerUserId: string; assignments: RosterAssignment[] }
+type RosterClaim = { id: string; rosterId: number; sleeperManagerName: string; sleeperTeamName: string; fantasyToolsName: string; fantasyToolsEmail: string; status: string }
+type RosterWorkspace = { primaryCommissionerUserId: string; assignments: RosterAssignment[]; claims: RosterClaim[] }
 type ChaosLeague = { leagueId: string; sleeperLeagueId: string; name: string; primaryCommissionerUserId: string; createdAt: string }
 type CardStatus = 'IDEA' | 'ARTWORK READY' | 'NEEDS REVIEW' | 'ACTIVE' | 'ARCHIVED'
 type UploadedCard = Card & { serverId?: string; artwork: string; rarity: string; copies: number; active: boolean; status: CardStatus; notes: string; updatedBy: string; updatedAt: string; effectType: string; special: boolean; sourcePlayer?: string; sourcePlayerId?: string; destinationSlot?: string; multiplier?: number }
@@ -72,7 +73,7 @@ function LineupComparison({ home, away }: { home: Team; away: Team }) {
   </section>
 }
 
-function RosterAssignments({ teams, assignments, onSave, onRemove }: { teams: Team[]; assignments: RosterAssignment[]; onSave: (team: Team, email: string) => Promise<void>; onRemove: (team: Team) => Promise<void> }) {
+function RosterAssignments({ teams, assignments, claims, leagueId, onSave, onRemove, onReview }: { teams: Team[]; assignments: RosterAssignment[]; claims: RosterClaim[]; leagueId:string; onSave: (team: Team, email: string) => Promise<void>; onRemove: (team: Team) => Promise<void>; onReview:(id:string,approve:boolean)=>Promise<void> }) {
   const [emails, setEmails] = useState<Record<number,string>>(() => Object.fromEntries(assignments.map(item => [item.rosterId,item.fantasyToolsEmail])))
   const [busy, setBusy] = useState<number | null>(null)
   const [message, setMessage] = useState('')
@@ -89,7 +90,10 @@ function RosterAssignments({ teams, assignments, onSave, onRemove }: { teams: Te
     catch (error) { setMessage((error as Error).message) }
     finally { setBusy(null) }
   }
-  return <main className="access-page roster-page"><div className="admin-heading"><div><div className="eyebrow">PRIMARY COMMISSIONER SETUP</div><h1>Connect Player Accounts</h1><p>Match each verified FantasyTools account to exactly one Sleeper roster. Players will sign in with email and automatically enter their own team.</p></div><div className="roster-progress"><b>{assignments.length} / {teams.length}</b><span>ROSTERS CONNECTED</span></div></div>
+  const inviteUrl=`${window.location.origin}/?invite=${leagueId}`
+  return <main className="access-page roster-page"><div className="admin-heading"><div><div className="eyebrow">PLAYER INVITATIONS</div><h1>Connect Player Accounts</h1><p>Share the invitation link. Players select their Sleeper roster and you approve the request.</p></div><div className="roster-progress"><b>{assignments.length} / {teams.length}</b><span>ROSTERS CONNECTED</span></div></div>
+    <section className="invite-panel"><div><span>LEAGUE INVITATION LINK</span><b>{inviteUrl}</b><small>Send this privately to your league members.</small></div><button className="primary" onClick={()=>navigator.clipboard.writeText(inviteUrl)}>COPY INVITE LINK</button></section>
+    {claims.filter(x=>x.status==='PENDING').length>0&&<section className="claim-review"><h2>Pending roster claims</h2>{claims.filter(x=>x.status==='PENDING').map(claim=><article key={claim.id}><div><b>{claim.fantasyToolsName}</b><span>{claim.fantasyToolsEmail}</span></div><div><b>{claim.sleeperTeamName}</b><span>{claim.sleeperManagerName}</span></div><button className="primary" onClick={()=>onReview(claim.id,true)}>APPROVE</button><button className="secondary" onClick={()=>onReview(claim.id,false)}>REJECT</button></article>)}</section>}
     {message && <div className="setup-message">{message}</div>}
     <section className="roster-assignment-list">{teams.map(team => { const assignment=assignments.find(item=>item.rosterId===team.id); return <article className={assignment?'connected':''} key={team.id}>
       <TeamBadge team={team}/><div className="roster-identity"><span>SLEEPER ROSTER {team.id}</span><h2>{team.name}</h2><p>{team.manager}</p></div>
@@ -232,6 +236,7 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
   const [editingCard, setEditingCard] = useState<UploadedCard | null>(null)
   const [permissionGrants, setPermissionGrants] = useState<Record<number,string[]>>(() => { try { return JSON.parse(localStorage.getItem('chaos-permission-grants') || '{}') } catch { return {} } })
   const [rosterAssignments, setRosterAssignments] = useState<RosterAssignment[]>(() => { try { return JSON.parse(localStorage.getItem('chaos-roster-assignments') || '[]') } catch { return [] } })
+  const [rosterClaims, setRosterClaims] = useState<RosterClaim[]>([])
   const [primaryCommissionerUserId, setPrimaryCommissionerUserId] = useState('')
   const [activeMatchup, setActiveMatchup] = useState(0)
   const home = teamData[activeMatchup * 2] || teamData[0], away = teamData[activeMatchup * 2 + 1] || teamData[1]
@@ -267,7 +272,7 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
       })
       .catch(() => { /* The first saved draft creates the workspace. */ })
     apiFetch<RosterWorkspace>(`/api/leagues/${workspaceId}/rosters`)
-      .then(workspace => { setPrimaryCommissionerUserId(workspace.primaryCommissionerUserId); setRosterAssignments(workspace.assignments); localStorage.setItem('chaos-roster-assignments',JSON.stringify(workspace.assignments)) })
+      .then(workspace => { setPrimaryCommissionerUserId(workspace.primaryCommissionerUserId); setRosterAssignments(workspace.assignments); setRosterClaims(workspace.claims||[]); localStorage.setItem('chaos-roster-assignments',JSON.stringify(workspace.assignments)) })
       .catch(() => { /* The commissioner starts setup from the roster screen. */ })
   }, [workspaceId])
 
@@ -367,7 +372,7 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
 
   return <div className="app-shell">
     <header><button className="brand" onClick={() => {setScreen('room');setActiveNav('League Room')}}><b>CC</b><span>CHAOS CARDS<small>FANTASY FOOTBALL</small></span></button><nav>{['League Room','Standings','Card Library','History'].map(n => <button className={activeNav===n?'active':''} onClick={() => {setActiveNav(n); setScreen(n==='Card Library'?'library':'room')}} key={n}>{n}</button>)}</nav><div className="admin-actions"><button className="admin-link roster-link" onClick={()=>{setScreen('rosters');setActiveNav('')}}>⇄ ROSTERS</button><button className="admin-link commissioner-link" onClick={()=>{setScreen('permissions');setActiveNav('')}}>♛ COMMISSIONERS</button><button className="admin-link creator-link" onClick={()=>{setScreen('admin');setActiveNav('')}}>⚙ CARD CREATOR</button><button className="admin-link signout-link" title={account?.email} onClick={logout}>Sign out</button></div><div className="week"><span>WEEK 1</span><b className={revealed?'':'preweek'}>{revealed?'REVEALED':'PRE-WEEK'}</b></div><TeamBadge team={home} small /></header>
-    {screen === 'rosters' ? <RosterAssignments teams={teamData} assignments={rosterAssignments} onSave={saveRosterAssignment} onRemove={removeRosterAssignment}/> : screen === 'permissions' ? <CommissionerAccess teams={teamData} grants={permissionGrants} onChange={updatePermissionGrants} leagueId={workspaceId}/> : screen === 'admin' ? <CardCreator initialCard={editingCard} onSave={saveUploadedCard} onCancel={()=>{setEditingCard(null);setScreen('library');setActiveNav('Card Library')}}/> : screen === 'library' ? <SharedCardLibrary uploaded={uploadedCards} onCreate={()=>{setEditingCard(null);setScreen('admin');setActiveNav('')}} onEdit={card=>{setEditingCard(card);setScreen('admin');setActiveNav('')}} onStatus={updateCardStatus} onDelete={deleteUploadedCard}/> : screen === 'room' ? <main className="room">
+    {screen === 'rosters' ? <RosterAssignments teams={teamData} assignments={rosterAssignments} claims={rosterClaims} leagueId={workspaceId} onSave={saveRosterAssignment} onRemove={removeRosterAssignment} onReview={reviewRosterClaim}/> : screen === 'permissions' ? <CommissionerAccess teams={teamData} grants={permissionGrants} onChange={updatePermissionGrants} leagueId={workspaceId}/> : screen === 'admin' ? <CardCreator initialCard={editingCard} onSave={saveUploadedCard} onCancel={()=>{setEditingCard(null);setScreen('library');setActiveNav('Card Library')}}/> : screen === 'library' ? <SharedCardLibrary uploaded={uploadedCards} onCreate={()=>{setEditingCard(null);setScreen('admin');setActiveNav('')}} onEdit={card=>{setEditingCard(card);setScreen('admin');setActiveNav('')}} onStatus={updateCardStatus} onDelete={deleteUploadedCard}/> : screen === 'room' ? <main className="room">
       <section className="room-hero"><div><div className="eyebrow">{leagueName} · WEEK 1 DEMO</div><h1>League Room</h1><p>{sleeperStatus === 'live' ? 'REAL SLEEPER TEAMS · DEMO MATCHUPS AND SCORES' : sleeperStatus === 'loading' ? 'IMPORTING YOUR SLEEPER MANAGERS…' : 'SLEEPER IMPORT BLOCKED HERE · SHOWING DEMO NAMES'}</p></div><div className="deadline"><span>THURSDAY CARD LOCK</span><strong>{revealed ? 'CARDS REVEALED' : '02 : 14 : 36'}</strong><button onClick={toggleReveal}>{revealed ? 'RESET TO PRE-WEEK' : 'COMMISSIONER: LOCK & REVEAL'}</button></div></section>
       <div className="ticker"><b>LIVE CHAOS</b><span>⚡ Stephen played CRUSHING BLOW</span><span>•</span><span>Jordan’s score jumps +7.5</span><span>•</span><span>🛡 LOCKDOWN activated</span></div>
       <section className="matchup-grid">{[0,2,4,6,8].map((i, index) => { const a=teamData[i], b=teamData[i+1]; if (!a || !b) return null; return <article className={`matchup ${index===0?'featured':''}`} key={a.id} onClick={() => {setActiveMatchup(index);setScreen('battle')}}>
@@ -420,7 +425,7 @@ function LeagueOnboarding({ onCreated }: { onCreated: (league: ChaosLeague) => v
     } catch (ex) { setError((ex as Error).message) }
     finally { setBusy(false) }
   }
-
+  const reviewRosterClaim = async (id:string, approve:boolean) => { const workspace=await apiFetch<RosterWorkspace>(`/api/leagues/${workspaceId}/rosters/claims/${id}?approve=${approve}`,{method:'POST'}); setRosterAssignments(workspace.assignments); setRosterClaims(workspace.claims||[]) }
   const create = async () => {
     if (!preview) return
     setBusy(true); setError('')
@@ -449,9 +454,18 @@ function LeagueOnboarding({ onCreated }: { onCreated: (league: ChaosLeague) => v
   </main>
 }
 
+function InviteClaim({ leagueId, onJoined }: { leagueId:string; onJoined:(league:ChaosLeague)=>void }) {
+  const [league,setLeague]=useState<ChaosLeague|null>(null), [teams,setTeams]=useState<Team[]>([]), [message,setMessage]=useState('Loading invitation…'), [busy,setBusy]=useState(false)
+  useEffect(()=>{ apiFetch<ChaosLeague>(`/api/chaos-leagues/invite/${leagueId}`).then(async found=>{setLeague(found); const [users,rosters]=await Promise.all([fetch(`https://api.sleeper.app/v1/league/${found.sleeperLeagueId}/users`).then(r=>r.json()),fetch(`https://api.sleeper.app/v1/league/${found.sleeperLeagueId}/rosters`).then(r=>r.json())]); setTeams(users.map((u:any,i:number)=>{const r=rosters.find((x:any)=>x.owner_id===u.user_id);const name=u.metadata?.team_name||`${u.display_name||u.username}'s Team`;return {...mockTeams[i%mockTeams.length],id:r?.roster_id||i+1,sleeperUserId:u.user_id,manager:u.display_name||u.username,name,initials:name.split(/\s+/).map((x:string)=>x[0]).join('').slice(0,2).toUpperCase()}}));setMessage('') }).catch(ex=>setMessage((ex as Error).message))},[leagueId])
+  const claim=async(team:Team)=>{setBusy(true);setMessage('');try{await apiFetch(`/api/chaos-leagues/invite/${leagueId}/join`,{method:'POST'});const result=await apiFetch<RosterClaim>(`/api/leagues/${leagueId}/rosters/claims`,{method:'POST',body:JSON.stringify({rosterId:team.id,sleeperUserId:team.sleeperUserId,sleeperManagerName:team.manager,sleeperTeamName:team.name})});if(result.status==='APPROVED'&&league)onJoined(league);else setMessage('Claim sent! Your commissioner must approve it before you enter the league.')}catch(ex){setMessage((ex as Error).message)}finally{setBusy(false)}}
+  return <main className="league-onboarding"><section className="onboarding-card claim-picker"><div className="eyebrow">LEAGUE INVITATION</div><h1>{league?.name||'Chaos Cards'}</h1><p>Select your own Sleeper roster. The commissioner will approve your request.</p>{message&&<div className="setup-message">{message}</div>}<div className="claim-team-list">{teams.map(team=><button disabled={busy} onClick={()=>claim(team)} key={team.id}><TeamBadge team={team} small/><span><b>{team.name}</b><small>{team.manager}</small></span><em>CLAIM →</em></button>)}</div></section></main>
+}
+
 export default function App() {
   const [league, setLeague] = useState<ChaosLeague | null | undefined>(undefined)
+  const inviteId=new URLSearchParams(window.location.search).get('invite')
   useEffect(() => { apiFetch<ChaosLeague>('/api/chaos-leagues/current').then(setLeague).catch(()=>setLeague(null)) }, [])
+  if(inviteId) return <InviteClaim leagueId={inviteId} onJoined={created=>{window.history.replaceState({},'', '/');setLeague(created)}}/>
   if (league === undefined) return <main className="league-onboarding"><div className="onboarding-loading">LOADING YOUR CHAOS LEAGUE…</div></main>
   if (league === null) return <LeagueOnboarding onCreated={setLeague}/>
   return <LeagueGame league={league}/>
