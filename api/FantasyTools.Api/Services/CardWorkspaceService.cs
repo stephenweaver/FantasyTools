@@ -14,7 +14,7 @@ public class CardWorkspaceService(IFileService fileService) : ICardWorkspaceServ
     {
         var workspace = await Load(leagueId);
         EnsureMember(workspace, userId);
-        if (workspace.PrimaryCommissionerUserId == userId && !workspace.Audit.Any(item => item.Action == "imported_card_data_ideas_v1"))
+        if (!workspace.Audit.Any(item => item.Action == "imported_card_data_ideas_v1"))
         {
             ImportCardData(workspace, userId);
             workspace.At = DateTime.UtcNow;
