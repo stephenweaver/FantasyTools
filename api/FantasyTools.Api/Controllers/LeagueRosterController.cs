@@ -24,6 +24,12 @@ public class LeagueRosterController(ILeagueRosterService service) : ControllerBa
     [HttpDelete("{rosterId:int}")]
     public async Task<ActionResult> Remove(string leagueId, int rosterId) => await Run(async () => { await service.Remove(leagueId, UserId, rosterId); return new { removed = true }; });
 
+    [HttpPost("claims")]
+    public async Task<ActionResult> Claim(string leagueId, [FromBody] CreateRosterClaimRequest request) => await Run(() => service.Claim(leagueId, UserId, User.FindFirstValue(ClaimTypes.Email), User.FindFirstValue(ClaimTypes.Name), request));
+
+    [HttpPost("claims/{claimId}")]
+    public async Task<ActionResult> Review(string leagueId, string claimId, [FromQuery] bool approve) => await Run(() => service.ReviewClaim(leagueId, UserId, claimId, approve));
+
     private string UserId => User.FindFirstValue(ClaimTypes.NameIdentifier);
 
     private async Task<ActionResult> Run<T>(Func<Task<T>> action)

@@ -17,6 +17,12 @@ public class ChaosLeagueController(IChaosLeagueService service) : ControllerBase
     [HttpPost]
     public async Task<ActionResult> Create([FromBody] CreateChaosLeagueRequest request) => await Run(() => service.Create(UserId, request));
 
+    [HttpGet("invite/{leagueId}")]
+    public async Task<ActionResult> Invite(string leagueId) => await Run(() => service.GetInvite(leagueId));
+
+    [HttpPost("invite/{leagueId}/join")]
+    public async Task<ActionResult> Join(string leagueId) => await Run(async () => { await service.Join(UserId,leagueId); return new { joined=true }; });
+
     private string UserId => User.FindFirstValue(ClaimTypes.NameIdentifier);
 
     private async Task<ActionResult> Run<T>(Func<Task<T>> action)
