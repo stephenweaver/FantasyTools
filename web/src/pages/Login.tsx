@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ApiError } from '../lib/api'
 import { AuthShell } from '../lib/AuthShell'
 import { useAuth } from '../lib/auth'
@@ -8,6 +8,8 @@ import { Turnstile } from '../lib/turnstile'
 export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const [params]=useSearchParams()
+  const returnUrl=params.get('returnUrl')||'/'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -25,7 +27,7 @@ export default function Login() {
 
     try {
       await login(email, password, captchaToken)
-      navigate('/')
+      navigate(returnUrl.startsWith('/')?returnUrl:'/')
     } catch (ex) {
       setError((ex as Error).message)
 
@@ -86,7 +88,7 @@ export default function Login() {
       </form>
 
       <p className="auth-footer">
-        No account? <Link to="/register">Create one</Link>
+        No account? <Link to={`/register?returnUrl=${encodeURIComponent(returnUrl)}`}>Create one</Link>
       </p>
     </AuthShell>
   )
