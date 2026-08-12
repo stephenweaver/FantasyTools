@@ -14,7 +14,7 @@ public class CardWorkspaceService(IFileService fileService) : ICardWorkspaceServ
     {
         var workspace = await Load(leagueId);
         EnsureMember(workspace, userId);
-        if (workspace.Cards.Count == 0 && workspace.PrimaryCommissionerUserId == userId)
+        if (workspace.PrimaryCommissionerUserId == userId && !workspace.Audit.Any(item => item.Action == "imported_card_data_ideas_v1"))
         {
             ImportCardData(workspace, userId);
             workspace.At = DateTime.UtcNow;
@@ -42,7 +42,8 @@ public class CardWorkspaceService(IFileService fileService) : ICardWorkspaceServ
             var p=row.Split('|');
             var description = p[0] == "ATTACK" ? $"Reduce your opponent's starting {p[3]} points by {p[2]}%." : p[0] == "DEFENSE" ? $"Reduce an incoming attack against your {p[3]} by {p[2]}%." : $"Increase your starting {p[3]} points by {p[2]}%.";
             var effect = p[0] == "ATTACK" ? "Percentage reduction" : p[0] == "DEFENSE" ? "Attack protection" : "Percentage boost";
-            workspace.Cards.Add(new CardDraftDocument { Id=Guid.NewGuid().ToString(), Name=p[1], Category=p[0], Rarity="Common", IsSpecial=false, ArtworkUrl="", OfficialDescription=description, CommissionerNotes="Imported from the Card Data sheet. Effect follows the indicated lineup position.", Target=p[3], EffectType=effect, Amount=decimal.Parse(p[2]), Copies=int.Parse(p[4]), Status="IDEA", CreatedByUserId=userId, UpdatedByUserId=userId, UpdatedByName="Card Data import", CreatedAt=now, UpdatedAt=now });
+            if (!workspace.Cards.Any(card => card.Name.Equals(p[1], StringComparison.OrdinalIgnoreCase)))
+                workspace.Cards.Add(new CardDraftDocument { Id=Guid.NewGuid().ToString(), Name=p[1], Category=p[0], Rarity="Common", IsSpecial=false, ArtworkUrl="", OfficialDescription=description, CommissionerNotes="Imported from the Card Data sheet. Effect follows the indicated lineup position.", Target=p[3], EffectType=effect, Amount=decimal.Parse(p[2]), Copies=int.Parse(p[4]), Status="IDEA", CreatedByUserId=userId, UpdatedByUserId=userId, UpdatedByName="Card Data import", CreatedAt=now, UpdatedAt=now });
         }
 
         var specials = new[]
@@ -74,9 +75,10 @@ public class CardWorkspaceService(IFileService fileService) : ICardWorkspaceServ
         foreach (var row in specials)
         {
             var p=row.Split('|');
-            workspace.Cards.Add(new CardDraftDocument { Id=Guid.NewGuid().ToString(), Name=p[0], Category="BOOST", Rarity="Specialty", IsSpecial=true, ArtworkUrl="", OfficialDescription=p[4], CommissionerNotes=$"Imported from the Card Data sheet. {p[5]}".Trim(), Target=p[1], EffectType="Specialty rule", Amount=decimal.Parse(p[2]), Copies=int.Parse(p[3]), Status="IDEA", CreatedByUserId=userId, UpdatedByUserId=userId, UpdatedByName="Card Data import", CreatedAt=now, UpdatedAt=now });
+            if (!workspace.Cards.Any(card => card.Name.Equals(p[0], StringComparison.OrdinalIgnoreCase)))
+                workspace.Cards.Add(new CardDraftDocument { Id=Guid.NewGuid().ToString(), Name=p[0], Category="BOOST", Rarity="Specialty", IsSpecial=true, ArtworkUrl="", OfficialDescription=p[4], CommissionerNotes=$"Imported from the Card Data sheet. {p[5]}".Trim(), Target=p[1], EffectType="Specialty rule", Amount=decimal.Parse(p[2]), Copies=int.Parse(p[3]), Status="IDEA", CreatedByUserId=userId, UpdatedByUserId=userId, UpdatedByName="Card Data import", CreatedAt=now, UpdatedAt=now });
         }
-        workspace.Audit.Insert(0, new CardAuditDocument { CardId="catalog-import", ActorUserId=userId, ActorName="Card Data import", Action="imported_47_idea_drafts", At=now });
+        workspace.Audit.Insert(0, new CardAuditDocument { CardId="catalog-import", ActorUserId=userId, ActorName="Card Data import", Action="imported_card_data_ideas_v1", At=now });
     }
 
     public Task<CardDraftDocument> Create(string leagueId, string userId, string userName, SaveCardDraftRequest request) =>
