@@ -37,6 +37,7 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<ICommissionerAuthorization, CommissionerAuthorization>();
         services.AddSingleton<ICardWorkspaceService, CardWorkspaceService>();
         services.AddSingleton<ILeagueRosterService, LeagueRosterService>();
+        services.AddSingleton<IChaosLeagueService, ChaosLeagueService>();
 
         // Card artwork. R2 vs local disk is decided by IMAGE_SERVICE / IMAGES_* the same way the
         // document store is decided by FILE_SERVICE / R2_*.
