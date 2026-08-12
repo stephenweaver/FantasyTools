@@ -8,6 +8,7 @@ type LineupPlayer = { name: string; position: string; nflTeam: string; opponent:
 type RosterAssignment = { rosterId: number; sleeperUserId: string; sleeperManagerName: string; sleeperTeamName: string; fantasyToolsUserId?: string; fantasyToolsEmail: string; fantasyToolsName?: string }
 type RosterClaim = { id: string; rosterId: number; sleeperManagerName: string; sleeperTeamName: string; fantasyToolsName: string; fantasyToolsEmail: string; status: string }
 type RosterWorkspace = { primaryCommissionerUserId: string; assignments: RosterAssignment[]; claims: RosterClaim[] }
+type CardWorkspaceAccess = { cards: any[]; collaborators?: { userId:string; permissions:string[] }[] }
 type ChaosLeague = { leagueId: string; sleeperLeagueId: string; name: string; primaryCommissionerUserId: string; createdAt: string }
 type CardStatus = 'IDEA' | 'ARTWORK READY' | 'NEEDS REVIEW' | 'ACTIVE' | 'ARCHIVED'
 type UploadedCard = Card & { serverId?: string; artwork: string; rarity: string; copies: number; active: boolean; status: CardStatus; notes: string; updatedBy: string; updatedAt: string; effectType: string; special: boolean; sourcePlayer?: string; sourcePlayerId?: string; destinationSlot?: string; multiplier?: number }
@@ -218,7 +219,7 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
   const { user: account, logout } = useAuth()
   const workspaceId = league.leagueId
   const sleeperLeagueId = league.sleeperLeagueId
-  const [screen, setScreen] = useState<'room' | 'battle' | 'admin' | 'library' | 'permissions' | 'rosters'>('room')
+  const [screen, setScreen] = useState<'home' | 'room' | 'battle' | 'admin' | 'library' | 'permissions' | 'rosters'>('home')
   const [selected, setSelected] = useState<number[]>([])
   const [played, setPlayed] = useState<Card[]>([])
   const [pending, setPending] = useState<Card[]>([])
@@ -238,11 +239,15 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
   const [rosterAssignments, setRosterAssignments] = useState<RosterAssignment[]>(() => { try { return JSON.parse(localStorage.getItem('chaos-roster-assignments') || '[]') } catch { return [] } })
   const [rosterClaims, setRosterClaims] = useState<RosterClaim[]>([])
   const [primaryCommissionerUserId, setPrimaryCommissionerUserId] = useState('')
+  const [cardPermissions, setCardPermissions] = useState<string[]>([])
   const [activeMatchup, setActiveMatchup] = useState(0)
   const home = teamData[activeMatchup * 2] || teamData[0], away = teamData[activeMatchup * 2 + 1] || teamData[1]
   const primaryRoster = rosterAssignments.find(item => item.fantasyToolsUserId === primaryCommissionerUserId)
   const primaryTeam = primaryRoster ? teamData.find(team => team.id === primaryRoster.rosterId) : undefined
   const viewerIsPrimary = Boolean(account?.userId && account.userId === primaryCommissionerUserId)
+  const viewerRoster = rosterAssignments.find(item => item.fantasyToolsUserId === account?.userId)
+  const viewerTeam = viewerRoster ? teamData.find(team => team.id === viewerRoster.rosterId) : undefined
+  const canCreateCards = viewerIsPrimary || cardPermissions.includes('create_card_drafts')
 
   useEffect(() => {
     Promise.all([
@@ -264,17 +269,18 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
   }, [sleeperLeagueId])
 
   useEffect(() => {
-    apiFetch<{cards: any[]}>(`/api/leagues/${workspaceId}/cards`)
+    apiFetch<CardWorkspaceAccess>(`/api/leagues/${workspaceId}/cards`)
       .then(workspace => {
         const shared = workspace.cards.map(fromServerCard)
         setUploadedCards(shared)
+        setCardPermissions(workspace.collaborators?.find(item=>item.userId===account?.userId)?.permissions || [])
         localStorage.setItem('chaos-uploaded-cards',JSON.stringify(shared))
       })
       .catch(() => { /* The first saved draft creates the workspace. */ })
     apiFetch<RosterWorkspace>(`/api/leagues/${workspaceId}/rosters`)
       .then(workspace => { setPrimaryCommissionerUserId(workspace.primaryCommissionerUserId); setRosterAssignments(workspace.assignments); setRosterClaims(workspace.claims||[]); localStorage.setItem('chaos-roster-assignments',JSON.stringify(workspace.assignments)) })
       .catch(() => { /* The commissioner starts setup from the roster screen. */ })
-  }, [workspaceId])
+  }, [workspaceId,account?.userId])
 
   // The server is the record for every card mutation -- localStorage only mirrors the answer so a
   // reload paints something before the workspace request returns.
@@ -298,6 +304,8 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
   }
   const updatePermissionGrants = (next: Record<number,string[]>) => {
     localStorage.setItem('chaos-permission-grants',JSON.stringify(next)); setPermissionGrants(next)
+    const cardKeys=['create_card_drafts','edit_card_rules','approve_cards']
+    rosterAssignments.forEach(assignment=>{if(!assignment.fantasyToolsUserId)return;apiFetch(`/api/leagues/${workspaceId}/cards/collaborators`,{method:'PUT',body:JSON.stringify({userId:assignment.fantasyToolsUserId,permissions:(next[assignment.rosterId]||[]).filter(permission=>cardKeys.includes(permission))})}).catch(()=>{})})
   }
   const saveRosterAssignment = async (team: Team, email: string) => {
     const requested: RosterAssignment = { rosterId:team.id, sleeperUserId:team.sleeperUserId || String(team.id), sleeperManagerName:team.manager, sleeperTeamName:team.name, fantasyToolsEmail:email.trim(), fantasyToolsName:email.trim() }
@@ -376,8 +384,8 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
   }
 
   return <div className="app-shell">
-    <header><button className="brand" onClick={() => {setScreen('room');setActiveNav('League Room')}}><b>CC</b><span>CHAOS CARDS<small>FANTASY FOOTBALL</small></span></button><nav>{['League Room','Standings','Card Library','History'].map(n => <button className={activeNav===n?'active':''} onClick={() => {setActiveNav(n); setScreen(n==='Card Library'?'library':'room')}} key={n}>{n}</button>)}</nav><div className="admin-actions"><button className="admin-link roster-link" onClick={()=>{setScreen('rosters');setActiveNav('')}}>⇄ ROSTERS</button><button className="admin-link commissioner-link" onClick={()=>{setScreen('permissions');setActiveNav('')}}>♛ COMMISSIONERS</button><button className="admin-link creator-link" onClick={()=>{setScreen('admin');setActiveNav('')}}>⚙ CARD CREATOR</button><button className="admin-link signout-link" title={account?.email} onClick={logout}>Sign out</button></div><div className="week"><span>WEEK 1</span><b className={revealed?'':'preweek'}>{revealed?'REVEALED':'PRE-WEEK'}</b></div><TeamBadge team={home} small /></header>
-    {screen === 'rosters' ? <RosterAssignments teams={teamData} assignments={rosterAssignments} claims={rosterClaims} leagueId={workspaceId} onSave={saveRosterAssignment} onRemove={removeRosterAssignment} onReview={reviewRosterClaim}/> : screen === 'permissions' ? <CommissionerAccess teams={teamData} grants={permissionGrants} onChange={updatePermissionGrants} leagueId={workspaceId}/> : screen === 'admin' ? <CardCreator initialCard={editingCard} onSave={saveUploadedCard} onCancel={()=>{setEditingCard(null);setScreen('library');setActiveNav('Card Library')}}/> : screen === 'library' ? <SharedCardLibrary uploaded={uploadedCards} onCreate={()=>{setEditingCard(null);setScreen('admin');setActiveNav('')}} onEdit={card=>{setEditingCard(card);setScreen('admin');setActiveNav('')}} onStatus={updateCardStatus} onDelete={deleteUploadedCard}/> : screen === 'room' ? <main className="room">
+    <header><button className="brand" onClick={() => {setScreen('home');setActiveNav('')}}><b>CC</b><span>CHAOS CARDS<small>FANTASY FOOTBALL</small></span></button><nav><button className={screen==='home'?'active':''} onClick={()=>{setScreen('home');setActiveNav('')}}>My Team</button>{['League Room','Standings','Card Library','History'].map(n => <button className={activeNav===n?'active':''} onClick={() => {setActiveNav(n); setScreen(n==='Card Library'?'library':'room')}} key={n}>{n}</button>)}</nav><div className="admin-actions">{viewerIsPrimary&&<button className="admin-link roster-link" onClick={()=>{setScreen('rosters');setActiveNav('')}}>⇄ ROSTERS</button>}{viewerIsPrimary&&<button className="admin-link commissioner-link" onClick={()=>{setScreen('permissions');setActiveNav('')}}>♛ COMMISSIONERS</button>}{canCreateCards&&<button className="admin-link creator-link" onClick={()=>{setScreen('admin');setActiveNav('')}}>⚙ CARD CREATOR</button>}<button className="admin-link signout-link" title={account?.email} onClick={logout}>Sign out</button></div><div className="week"><span>{viewerTeam?.name || account?.name || 'MY TEAM'}</span><b className={revealed?'':'preweek'}>{revealed?'REVEALED':'PRE-WEEK'}</b></div><TeamBadge team={viewerTeam || home} small /></header>
+    {screen === 'home' ? <main className="team-home"><section className="team-home-hero"><div className="eyebrow">SIGNED IN AS {account?.email}</div><div className="team-home-title"><TeamBadge team={viewerTeam || home}/><div><span>YOUR FANTASY TEAM</span><h1>{viewerTeam?.name || 'Roster connection pending'}</h1><p>{viewerTeam ? `${viewerTeam.manager} · ${viewerTeam.record}` : 'Your commissioner must approve and connect your Sleeper roster.'}</p></div></div><button className="primary enter-league" onClick={()=>{setScreen('room');setActiveNav('League Room')}}>ENTER LEAGUE ROOM →</button></section><section className="home-summary"><article><span>WEEK 1 MATCHUP</span><strong>{viewerTeam?.score.toFixed(1) || '—'}</strong><p>Sleeper points</p></article><article><span>YOUR CHAOS SCORE</span><strong>{viewerTeam?.chaos.toFixed(1) || '—'}</strong><p>After card effects</p></article><article><span>CARDS IN HAND</span><strong>{viewerTeam?.hand ?? 0}</strong><p>Ready to inspect and play</p></article><article><span>ROSTER STATUS</span><strong className="status-word">{viewerTeam?'CONNECTED':'PENDING'}</strong><p>{viewerTeam?'FantasyTools account linked':'Waiting for commissioner'}</p></article></section><section className="home-panels"><article><div className="section-title"><h3>YOUR CARDS</h3><span>{cards.length} AVAILABLE</span></div><div className="home-card-fan">{cards.slice(0,3).map(card=><ChaosCard card={card} compact key={card.id}/>)}</div><button onClick={()=>{setScreen('battle');setActiveNav('')}}>VIEW HAND & PLAY CARDS →</button></article><article><div className="section-title"><h3>YOUR STARTING ROSTER</h3><span>WEEK 1</span></div>{lineupFor(viewerTeam?.id || home.id,0).slice(0,5).map(player=><div className="home-player" key={`${player.position}-${player.name}`}><b>{player.position}</b><span>{player.name}<small>{player.nflTeam} · vs {player.opponent}</small></span><strong>{player.points.toFixed(1)}</strong></div>)}<button onClick={()=>{setScreen('battle');setActiveNav('')}}>VIEW FULL MATCHUP →</button></article></section></main> : screen === 'rosters' ? <RosterAssignments teams={teamData} assignments={rosterAssignments} claims={rosterClaims} leagueId={workspaceId} onSave={saveRosterAssignment} onRemove={removeRosterAssignment} onReview={reviewRosterClaim}/> : screen === 'permissions' ? <CommissionerAccess teams={teamData} grants={permissionGrants} onChange={updatePermissionGrants} leagueId={workspaceId}/> : screen === 'admin' && canCreateCards ? <CardCreator initialCard={editingCard} onSave={saveUploadedCard} onCancel={()=>{setEditingCard(null);setScreen('library');setActiveNav('Card Library')}}/> : screen === 'library' ? <SharedCardLibrary uploaded={uploadedCards} onCreate={()=>{if(canCreateCards){setEditingCard(null);setScreen('admin');setActiveNav('')}}} onEdit={card=>{if(canCreateCards){setEditingCard(card);setScreen('admin');setActiveNav('')}}} onStatus={updateCardStatus} onDelete={deleteUploadedCard}/> : screen === 'room' ? <main className="room">
       <section className="room-hero"><div><div className="eyebrow">{leagueName} · WEEK 1 DEMO</div><h1>League Room</h1><p>{sleeperStatus === 'live' ? 'REAL SLEEPER TEAMS · DEMO MATCHUPS AND SCORES' : sleeperStatus === 'loading' ? 'IMPORTING YOUR SLEEPER MANAGERS…' : 'SLEEPER IMPORT BLOCKED HERE · SHOWING DEMO NAMES'}</p></div><div className="deadline"><span>THURSDAY CARD LOCK</span><strong>{revealed ? 'CARDS REVEALED' : '02 : 14 : 36'}</strong><button onClick={toggleReveal}>{revealed ? 'RESET TO PRE-WEEK' : 'COMMISSIONER: LOCK & REVEAL'}</button></div></section>
       <div className="ticker"><b>LIVE CHAOS</b><span>⚡ Stephen played CRUSHING BLOW</span><span>•</span><span>Jordan’s score jumps +7.5</span><span>•</span><span>🛡 LOCKDOWN activated</span></div>
       <section className="matchup-grid">{[0,2,4,6,8].map((i, index) => { const a=teamData[i], b=teamData[i+1]; if (!a || !b) return null; return <article className={`matchup ${index===0?'featured':''}`} key={a.id} onClick={() => {setActiveMatchup(index);setScreen('battle')}}>
