@@ -1,11 +1,13 @@
 using FantasyTools.Api.Documents;
 using FantasyTools.Api.Models;
+using FantasyTools.Api.Game.Domain;
+using FantasyTools.Api.Game.Engine;
 using System.Collections.Concurrent;
 using System.Text.Json;
 
 namespace FantasyTools.Api.Services;
 
-public class LeagueGameService(IFileService files, HttpClient sleeper) : ILeagueGameService
+public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosScoringEngine scoring) : ILeagueGameService
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new();
     private static Dictionary<string, PlayerInfo> PlayerCache = [];
@@ -54,7 +56,7 @@ public class LeagueGameService(IFileService files, HttpClient sleeper) : ILeague
     public async Task<object> GetWeek(string leagueId,string userId,int week)
     {
         var game=await Load(leagueId); var roster=await UserRoster(leagueId,userId); var state=game.Weeks.FirstOrDefault(x=>x.Week==week);
-        if(state==null) return new { week, status="setup", sleeperStatus=game.SleeperStatus, team=game.Teams.FirstOrDefault(x=>x.RosterId==roster), hand=Array.Empty<object>(), selections=Array.Empty<object>(), canDraw=false, cardsNeeded=0, teams=game.Teams, matchups=game.Matchups.Where(x=>x.Week==week) };
+        if(state==null) return new { week, status="setup", sleeperStatus=game.SleeperStatus, team=game.Teams.FirstOrDefault(x=>x.RosterId==roster), hand=Array.Empty<object>(), selections=Array.Empty<object>(), canDraw=false, cardsNeeded=0, teams=game.Teams, matchups=game.Matchups.Where(x=>x.Week==week), chaosScores=Array.Empty<object>() };
         if(state.Status=="selection_open"&&DateTime.UtcNow>=state.DeadlineUtc)
         {
             var deck=Deck(await Workspace(leagueId)); EnsureDeck(deck);
@@ -63,8 +65,10 @@ public class LeagueGameService(IFileService files, HttpClient sleeper) : ILeague
         }
         var own=state.Teams.FirstOrDefault(x=>x.RosterId==roster);
         var seasonHand=SeasonHand(game,roster);
+        var workspace=await Workspace(leagueId);
+        var chaosScores=CalculateScores(game,state,workspace,week);
         object publicSelections=state.Status is "revealed" or "live" or "finalized" ? state.Teams.Select(x=>new {x.RosterId,x.Selections}).ToList() : Array.Empty<object>();
-        return new { state.Week,state.Status,state.DeadlineUtc,state.RevealedAtUtc,sleeperStatus=game.SleeperStatus,team=game.Teams.FirstOrDefault(x=>x.RosterId==roster),hand=own?.DrawnAtUtc is null?seasonHand.Cards:own.Hand,selections=own?.Selections??[],canDraw=state.Status=="selection_open"&&own?.DrawnAtUtc is null,cardsNeeded=Math.Max(0,8-seasonHand.Cards.Count),publicSelections,teams=game.Teams,matchups=game.Matchups.Where(x=>x.Week==week) };
+        return new { state.Week,state.Status,state.DeadlineUtc,state.RevealedAtUtc,sleeperStatus=game.SleeperStatus,team=game.Teams.FirstOrDefault(x=>x.RosterId==roster),hand=own?.DrawnAtUtc is null?seasonHand.Cards:own.Hand,selections=own?.Selections??[],canDraw=state.Status=="selection_open"&&own?.DrawnAtUtc is null,cardsNeeded=Math.Max(0,8-seasonHand.Cards.Count),publicSelections,teams=game.Teams,matchups=game.Matchups.Where(x=>x.Week==week),chaosScores };
     }
 
     public async Task<object> Deal(string leagueId,string actorUserId,int week) => await Mutate(leagueId,async game =>
@@ -103,6 +107,60 @@ public class LeagueGameService(IFileService files, HttpClient sleeper) : ILeague
     public async Task<object> Return(string leagueId,string userId,int week,string copyId)=>await Mutate(leagueId,async game=>{var roster=await UserRoster(leagueId,userId);var state=Week(game,week);EnsureOpen(state);state.Teams.Single(x=>x.RosterId==roster).Selections.RemoveAll(x=>x.CopyId==copyId);return (object)new{returned=true};});
     public async Task<object> SetDeadline(string leagueId,string actorUserId,int week,DateTime deadlineUtc)=>await Mutate(leagueId,async game=>{await Commissioner(leagueId,actorUserId);var state=Week(game,week);state.DeadlineUtc=deadlineUtc.ToUniversalTime();return (object)new{state.Week,state.DeadlineUtc};});
     public async Task<object> Reveal(string leagueId,string actorUserId,int week)=>await Mutate(leagueId,async game=>{await Commissioner(leagueId,actorUserId);var state=Week(game,week);if(state.Teams.Any(x=>!Complete(x.Selections)))throw new InvalidOperationException("Every team must have 1 Boost, 1 Attack, and 2 Unique cards selected.");state.Status="revealed";state.RevealedAtUtc=DateTime.UtcNow;return (object)new{revealed=true,state.RevealedAtUtc};});
+
+    private object[] CalculateScores(LeagueGameDocument game,WeeklyGameDocument state,CardWorkspaceDocument workspace,int week)
+    {
+        var playerScores=game.Matchups.Where(x=>x.Week==week).SelectMany(x=>x.PlayerPoints).GroupBy(x=>x.Key).ToDictionary(x=>x.Key,x=>x.Last().Value);
+        var weekly=workspace.WeeklyCards.FirstOrDefault(x=>x.Week==week&&x.Active);
+        return game.Teams.Select(team=>
+        {
+            var effects=new List<ActiveEffect>();
+            foreach(var teamWeek in state.Teams)
+            foreach(var selection in teamWeek.Selections)
+            {
+                var card=workspace.Cards.FirstOrDefault(x=>x.Id==selection.CardId);if(card is null)continue;
+                var targetRoster=int.TryParse(selection.TargetRosterId,out var parsed)?parsed:teamWeek.RosterId;
+                if(targetRoster==team.RosterId)effects.Add(ToEffect(card,selection,targetRoster));
+            }
+            if(weekly is not null)effects.Add(ToWeeklyEffect(weekly,team.RosterId));
+            var counters=new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
+            var starters=team.Players.Where(x=>x.Starter).Select(player=>
+            {
+                counters[player.Position]=counters.GetValueOrDefault(player.Position)+1;
+                var slot=counters[player.Position]==1?player.Position:$"{player.Position}{counters[player.Position]}";
+                return new SlotScore(slot,player.PlayerId,player.Name,player.Position,player.Points);
+            }).ToList();
+            var result=scoring.Calculate(new TeamScoreInput(TeamGuid(team.RosterId),starters,playerScores,effects));
+            return (object)new {rosterId=team.RosterId,result.SleeperScore,result.ChaosScore,result.Lines};
+        }).ToArray();
+    }
+
+    private static ActiveEffect ToEffect(CardDraftDocument card,CardSelectionDocument selection,int rosterId)
+    {
+        var category=Enum.TryParse<CardCategory>(Normalize(card.Category),true,out var parsed)?parsed:CardCategory.Unique;
+        var type=ParseEffect(card.EffectType);
+        var amount=category==CardCategory.Attack&&type is EffectType.Percentage or EffectType.FlatPoints?-Math.Abs(card.Amount):card.Amount;
+        var target=new CardTarget(TargetType.Dynamic,TeamGuid(rosterId),selection.TargetSlot,null,selection.TargetPlayerId,null);
+        return new ActiveEffect(Guid.TryParse(selection.CopyId,out var id)?id:Guid.NewGuid(),card.Name,category,type,target,amount,card.SourcePlayerId,card.DestinationSlot,card.Multiplier,card.Name);
+    }
+
+    private static ActiveEffect ToWeeklyEffect(WeeklyCardDocument card,int rosterId)
+    {
+        var target=new CardTarget(TargetType.Team,TeamGuid(rosterId),null,null,null,null);
+        return new ActiveEffect(Guid.TryParse(card.Id,out var id)?id:Guid.NewGuid(),card.Name,CardCategory.Unique,ParseEffect(card.RuleType),target,card.Amount,CustomHandler:card.Name);
+    }
+
+    private static EffectType ParseEffect(string value)
+    {
+        var text=(value??"").ToLowerInvariant();
+        if(text.Contains("referenced player"))return EffectType.ReferencedPlayerReplacesSlot;
+        if(text.Contains("block"))return EffectType.BlockAttack;
+        if(text.Contains("reduce attack"))return EffectType.ReduceAttack;
+        if(text.Contains("percent"))return EffectType.Percentage;
+        if(text.Contains("flat")||text.Contains("point"))return EffectType.FlatPoints;
+        return EffectType.Custom;
+    }
+    private static Guid TeamGuid(int rosterId){Span<byte> bytes=stackalloc byte[16];BitConverter.TryWriteBytes(bytes,rosterId);return new Guid(bytes);}
 
     private async Task<object> Mutate(string leagueId,Func<LeagueGameDocument,Task<object>> action){var gate=Locks.GetOrAdd(leagueId,_=>new(1,1));await gate.WaitAsync();try{var game=await Load(leagueId);var result=await action(game);game.At=DateTime.UtcNow;await files.Upsert(game);return result;}finally{gate.Release();}}
     private async Task<ChaosLeagueDocument> League(string id)=>await files.Retrieve(new ChaosLeagueDocument{LeagueId=id})??throw new KeyNotFoundException("League not found.");

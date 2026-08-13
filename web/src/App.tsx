@@ -19,7 +19,8 @@ type SyncedTeam = { rosterId:number; ownerId:string; managerName:string; teamNam
 type SyncedMatchup = { week:number; matchupId:number; rosterId:number; points:number; starters:string[]; playerPoints:Record<string,number> }
 type DealtCard = { copyId:string; cardId:string; name:string; category:Category; artworkUrl:string; description:string; target:string }
 type SavedSelection = { copyId:string; cardId:string; category:Category; targetRosterId?:string; targetPlayerId?:string; targetSlot?:string }
-type GameWeek = { week:number; status:string; deadlineUtc?:string; sleeperStatus:string; team?:SyncedTeam; hand:DealtCard[]; selections:SavedSelection[]; canDraw?:boolean; cardsNeeded?:number; teams?:SyncedTeam[]; matchups:SyncedMatchup[] }
+type ChaosScore = { rosterId:number; sleeperScore:number; chaosScore:number; lines:{description:string;change:number}[] }
+type GameWeek = { week:number; status:string; deadlineUtc?:string; sleeperStatus:string; team?:SyncedTeam; hand:DealtCard[]; selections:SavedSelection[]; canDraw?:boolean; cardsNeeded?:number; teams?:SyncedTeam[]; matchups:SyncedMatchup[]; chaosScores?:ChaosScore[] }
 
 const fromServerCard = (card: any): UploadedCard => ({ id: Number(String(card.id).replace(/\D/g,'').slice(0,12)) || Date.now(), serverId: card.id, name: card.name, category: card.category, amount: card.amount, target: card.target, copy: card.officialDescription, icon: card.category === 'ATTACK' ? '⚡' : card.category === 'BOOST' ? '🔥' : '🛡', artwork: card.artworkUrl || '', rarity: card.rarity, copies: card.copies, active: card.status === 'ACTIVE', status: card.status, notes: card.commissionerNotes || '', updatedBy: card.updatedByName || 'Commissioner', updatedAt: card.updatedAt, effectType: card.effectType, special: card.isSpecial, sourcePlayer: card.sourcePlayer, sourcePlayerId: card.sourcePlayerId, destinationSlot: card.destinationSlot, multiplier: card.multiplier })
 const toServerCard = (card: UploadedCard, submitForReview: boolean) => ({ name: card.name, category: card.category, rarity: card.rarity, isSpecial: card.special, artworkUrl: card.artwork, officialDescription: card.copy, commissionerNotes: card.notes, target: card.target, effectType: card.effectType, amount: card.amount, copies: card.copies, sourcePlayer: card.sourcePlayer, sourcePlayerId: card.sourcePlayerId, destinationSlot: card.destinationSlot, multiplier: card.multiplier, submitForReview })
@@ -69,9 +70,9 @@ function TeamBadge({ team, small }: { team: Team; small?: boolean }) {
   return <div className={`team-badge ${small ? 'small' : ''}`} style={{ '--team': team.accent } as React.CSSProperties}>{team.initials}</div>
 }
 
-function LineupComparison({ home, away, left = lineupFor(home.id,0), right = lineupFor(away.id,1) }: { home: Team; away: Team; left?:LineupPlayer[]; right?:LineupPlayer[] }) {
+function LineupComparison({ home, away, week, left = [], right = [] }: { home: Team; away: Team; week:number; left?:LineupPlayer[]; right?:LineupPlayer[] }) {
   const [expanded, setExpanded] = useState<number | null>(null)
-  return <section className="lineup-comparison"><div className="lineup-title"><div><span>WEEK 1 MATCHUP</span><h2>Starting Lineups</h2></div><p>Tap any player to view the stats behind their score.</p></div>
+  return <section className="lineup-comparison"><div className="lineup-title"><div><span>WEEK {week} MATCHUP</span><h2>Starting Lineups</h2></div><p>Tap any player to view the stats behind their score.</p></div>
     <div className="lineup-columns lineup-team-head"><div><TeamBadge team={home} small/><span><b>{home.name}</b><small>{home.manager}</small></span><strong>{home.score.toFixed(2)}</strong></div><i>VS</i><div><strong>{away.score.toFixed(2)}</strong><span><b>{away.name}</b><small>{away.manager}</small></span><TeamBadge team={away} small/></div></div>
     <div className="lineup-list">{left.map((player,index) => { const opponent=right[index]||{name:'Open slot',position:player.position,nflTeam:'—',opponent:'—',game:'',projection:0,points:0,stats:'No starter assigned.',status:'OPEN'}; const open=expanded===index; return <button className={`lineup-row ${open?'expanded':''}`} onClick={()=>setExpanded(open?null:index)} key={`${player.name}-${index}`}>
       <div className="lineup-player left-player"><span className="player-avatar">{player.name.split(' ').map(word=>word[0]).join('').slice(0,2)}</span><span><b>{player.name}</b><small>{player.position} · {player.nflTeam} · vs {player.opponent}</small><em>{player.game} · {player.status}</em>{open&&<p>{player.stats}</p>}</span><strong>{player.points.toFixed(2)}<small>PROJ {player.projection.toFixed(2)}</small></strong></div>
@@ -253,13 +254,14 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
   const [played, setPlayed] = useState<Card[]>([])
   const [pending, setPending] = useState<Card[]>([])
   const [liveCardPlayed, setLiveCardPlayed] = useState(false)
-  const [log, setLog] = useState(initialLog)
+  const [log, setLog] = useState<string[][]>([])
   const [targeting, setTargeting] = useState(false)
   const [inspecting, setInspecting] = useState<Card | null>(null)
   const [toast, setToast] = useState('')
   const [revealed, setRevealed] = useState(false)
   const [activeNav, setActiveNav] = useState('League Room')
-  const [teamData, setTeamData] = useState<Team[]>(mockTeams)
+  const [teamData, setTeamData] = useState<Team[]>([])
+  const [currentWeek,setCurrentWeek]=useState(1)
   const [leagueName, setLeagueName] = useState('THE CHAOS LEAGUE')
   const [sleeperStatus, setSleeperStatus] = useState<'loading'|'live'|'fallback'>('loading')
   const [uploadedCards, setUploadedCards] = useState<UploadedCard[]>(() => { try { return JSON.parse(localStorage.getItem('chaos-uploaded-cards') || '[]').map((card: UploadedCard) => ({...card,status:card.status || (card.active?'ACTIVE':'ARTWORK READY'),notes:card.notes || '',updatedBy:card.updatedBy || 'Commissioner',updatedAt:card.updatedAt || new Date().toISOString()})) } catch { return [] } })
@@ -273,7 +275,8 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
   const [activeMatchup, setActiveMatchup] = useState(0)
   const [gameWeek,setGameWeek]=useState<GameWeek|null>(null)
   const [gameMessage,setGameMessage]=useState('')
-  const home = teamData[activeMatchup * 2] || teamData[0], away = teamData[activeMatchup * 2 + 1] || teamData[1]
+  const emptyTeam:Team={id:0,manager:'Roster pending',name:'Roster pending',initials:'—',record:'0–0',score:0,chaos:0,hand:0,accent:'#64748b'}
+  const home = teamData[activeMatchup * 2] || teamData[0] || emptyTeam, away = teamData[activeMatchup * 2 + 1] || teamData[1] || emptyTeam
   const primaryRoster = rosterAssignments.find(item => item.fantasyToolsUserId === primaryCommissionerUserId)
   const primaryTeam = primaryRoster ? teamData.find(team => team.id === primaryRoster.rosterId) : undefined
   const viewerIsPrimary = Boolean(account?.userId && account.userId === primaryCommissionerUserId)
@@ -281,10 +284,10 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
   const viewerTeam = viewerRoster ? teamData.find(team => team.id === viewerRoster.rosterId) : undefined
   const canCreateCards = viewerIsPrimary || cardPermissions.includes('create_card_drafts')
   const dealtCards:Card[]=(gameWeek?.hand||[]).map((card,index)=>({id:Array.from(card.copyId).reduce((sum,char)=>((sum*31+char.charCodeAt(0))|0),0)+index,copyId:card.copyId,serverId:card.cardId,artworkUrl:card.artworkUrl,name:card.name,category:card.category,amount:0,target:card.target,copy:card.description,icon:card.category==='ATTACK'?'⚡':card.category==='BOOST'?'🔥':'★'}))
-  const handCards=gameWeek?dealtCards:cards
+  const handCards=dealtCards
   const syncedLineup=(teamId:number,side:number,startersOnly=true):LineupPlayer[]=>{
     const team=gameWeek?.teams?.find(item=>item.rosterId===teamId)
-    if(!team?.players?.length)return lineupFor(teamId,side)
+    if(!team?.players?.length)return []
     const sorted=[...team.players].sort((a,b)=>Number(b.starter)-Number(a.starter))
     return sorted.filter(player=>!startersOnly||player.starter).map(player=>({name:player.name,position:player.position||'—',nflTeam:player.nflTeam||'FA',opponent:'TBD',game:player.starter?'STARTER':'BENCH',projection:0,points:Number(player.points||0),stats:'Live fantasy points imported from Sleeper.',status:player.starter?'ACTIVE':'BENCH'}))
   }
@@ -300,25 +303,27 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
     setGameWeek(week)
     if(week.teams?.length){
       const ordered=[...week.teams].sort((a,b)=>{const ma=week.matchups.find(item=>item.rosterId===a.rosterId)?.matchupId??999;const mb=week.matchups.find(item=>item.rosterId===b.rosterId)?.matchupId??999;return ma-mb||a.rosterId-b.rosterId})
-      const imported=ordered.map((team,index)=>{const visual=mockTeams[index%mockTeams.length];const matchup=week.matchups.find(item=>item.rosterId===team.rosterId);return {...visual,id:team.rosterId,sleeperUserId:team.ownerId,manager:team.managerName||`Roster ${team.rosterId}`,name:team.teamName||`${team.managerName}'s Team`,initials:(team.teamName||team.managerName||'TM').split(/\s+/).map(word=>word[0]).join('').slice(0,2).toUpperCase(),record:`${team.wins}–${team.losses}`,score:matchup?.points||0,chaos:matchup?.points||0,hand:team.rosterId===week.team?.rosterId?week.hand.length:(week.status==='setup'?0:8)}})
-      if(imported.length>=2)setTeamData(imported)
+      const palette=['#9cff57','#ff4e79','#ffd452','#54d6ff','#b783ff','#ff9f43','#56e3c2','#fb7185','#a78bfa','#38bdf8']
+      const imported=ordered.map((team,index)=>{const matchup=week.matchups.find(item=>item.rosterId===team.rosterId);const calculated=week.chaosScores?.find(item=>item.rosterId===team.rosterId);return {id:team.rosterId,sleeperUserId:team.ownerId,manager:team.managerName||`Roster ${team.rosterId}`,name:team.teamName||`${team.managerName}'s Team`,initials:(team.teamName||team.managerName||'TM').split(/\s+/).map(word=>word[0]).join('').slice(0,2).toUpperCase(),record:`${team.wins}–${team.losses}`,score:matchup?.points||0,chaos:calculated?.chaosScore??matchup?.points??0,hand:team.rosterId===week.team?.rosterId?week.hand.length:0,accent:palette[index%palette.length]}}
+      setTeamData(imported)
     }
     setSleeperStatus('live')
   }
-  const refreshGame=async()=>{const week=await apiFetch<GameWeek>(`/api/leagues/${workspaceId}/game/weeks/1`);applySyncedWeek(week);return week}
+  const refreshGame=async(weekNumber=currentWeek)=>{const week=await apiFetch<GameWeek>(`/api/leagues/${workspaceId}/game/weeks/${weekNumber}`);applySyncedWeek(week);return week}
 
   useEffect(() => {
-    apiFetch(`/api/leagues/${workspaceId}/game/sync/1`,{method:'POST'})
-      .then(()=>refreshGame())
-      .catch(()=>refreshGame())
-      .catch(()=>setSleeperStatus('fallback'))
+    fetch('https://api.sleeper.app/v1/state/nfl').then(response=>response.ok?response.json():Promise.reject()).then(state=>{
+      const week=Math.max(1,Math.min(18,Number(state.week||state.display_week||1)))
+      setCurrentWeek(week)
+      return apiFetch(`/api/leagues/${workspaceId}/game/sync/${week}`,{method:'POST'}).then(()=>refreshGame(week)).catch(()=>refreshGame(week))
+    }).catch(()=>setSleeperStatus('fallback'))
     fetch(`https://api.sleeper.app/v1/league/${sleeperLeagueId}`).then(r=>r.ok?r.json():Promise.reject()).then(data=>setLeagueName(data.name||league.name||'SLEEPER LEAGUE')).catch(()=>setLeagueName(league.name||'SLEEPER LEAGUE'))
   }, [sleeperLeagueId,workspaceId])
 
   useEffect(()=>{
-    const timer=window.setInterval(()=>apiFetch(`/api/leagues/${workspaceId}/game/sync/1`,{method:'POST'}).then(()=>refreshGame()).catch(()=>{}),60000)
+    const timer=window.setInterval(()=>apiFetch(`/api/leagues/${workspaceId}/game/sync/${currentWeek}`,{method:'POST'}).then(()=>refreshGame(currentWeek)).catch(()=>{}),60000)
     return()=>window.clearInterval(timer)
-  },[workspaceId])
+  },[workspaceId,currentWeek])
 
   useEffect(() => {
     apiFetch<CardWorkspaceAccess>(`/api/leagues/${workspaceId}/cards`)
@@ -432,7 +437,7 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
       const limit = normalized === 'UNIQUE' ? 2 : 1
       if (count >= limit) { setTargeting(false); setSelected([]); setToast(`Your ${normalized} slots are already full.`); return }
       if(card.copyId){
-        try { await apiFetch(`/api/leagues/${workspaceId}/game/weeks/1/selections`,{method:'POST',body:JSON.stringify({copyId:card.copyId,targetRosterId:chosen?.rosterId||'',targetPlayerId:chosen?.playerId||'',targetSlot:chosen?.slot||''})}); await refreshGame() }
+        try { await apiFetch(`/api/leagues/${workspaceId}/game/weeks/${currentWeek}/selections`,{method:'POST',body:JSON.stringify({copyId:card.copyId,targetRosterId:chosen?.rosterId||'',targetPlayerId:chosen?.playerId||'',targetSlot:chosen?.slot||''})}); await refreshGame() }
         catch(error){setTargeting(false);setSelected([]);setToast((error as Error).message);return}
       } else setPending(p => [...p, card])
       setLog(l => [[new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), '🔒', `${card.name.toUpperCase()} was selected privately. It can be changed before the deadline.`], ...l])
@@ -444,7 +449,7 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
 
   const returnToHand = async (card: Card) => {
     if (revealed) return
-    if(card.copyId){try{await apiFetch(`/api/leagues/${workspaceId}/game/weeks/1/selections/${card.copyId}`,{method:'DELETE'});await refreshGame()}catch(error){setToast((error as Error).message);return}}
+    if(card.copyId){try{await apiFetch(`/api/leagues/${workspaceId}/game/weeks/${currentWeek}/selections/${card.copyId}`,{method:'DELETE'});await refreshGame()}catch(error){setToast((error as Error).message);return}}
     else setPending(current => current.filter(item => item.id !== card.id))
     setLog(l => [[new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), '↩', `${card.name.toUpperCase()} was returned to the private hand before lock.`], ...l])
     setToast(`${card.name} returned to your hand.`); setTimeout(() => setToast(''), 2200)
@@ -454,7 +459,7 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
     if (!revealed) {
       const boost=pending.filter(card=>card.category==='BOOST').length,attack=pending.filter(card=>card.category==='ATTACK').length,unique=pending.filter(card=>card.category==='UNIQUE').length
       if(pending.length!==4||boost!==1||attack!==1||unique!==2){setToast('Select exactly 1 Boost, 1 Attack, and 2 Unique cards.');return}
-      if(gameWeek){try{await apiFetch(`/api/leagues/${workspaceId}/game/weeks/1/reveal`,{method:'POST'});await refreshGame()}catch(error){setToast((error as Error).message);return}}
+      if(gameWeek){try{await apiFetch(`/api/leagues/${workspaceId}/game/weeks/${currentWeek}/reveal`,{method:'POST'});await refreshGame()}catch(error){setToast((error as Error).message);return}}
       setPlayed(current => [...current, ...pending]); setPending([]); setRevealed(true)
       setLog(l => [['NOW', '👁', 'Pre-week selections locked and revealed across the league.'], ...l])
     } else {
@@ -463,17 +468,17 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
   }
 
   const dealWeek=async()=>{
-    setGameMessage('Opening Week 1 for card drawing…')
-    try{await apiFetch(`/api/leagues/${workspaceId}/game/weeks/1/deal`,{method:'POST'});await refreshGame();setGameMessage('Week 1 is open. Each player can now draw back up to eight cards.')}
+    setGameMessage(`Opening Week ${currentWeek} for card drawing…`)
+    try{await apiFetch(`/api/leagues/${workspaceId}/game/weeks/${currentWeek}/deal`,{method:'POST'});await refreshGame();setGameMessage(`Week ${currentWeek} is open. Each player can now draw back up to eight cards.`)}
     catch(error){setGameMessage((error as Error).message)}
   }
   const drawCards=async()=>{
     setGameMessage('Drawing enough cards to fill your hand…')
-    try{const result=await apiFetch<{drawnCards:number;cardsInHand:number}>(`/api/leagues/${workspaceId}/game/weeks/1/draw`,{method:'POST'});await refreshGame();setGameMessage(`You drew ${result.drawnCards} card${result.drawnCards===1?'':'s'}. Your hand now has ${result.cardsInHand}.`)}
+    try{const result=await apiFetch<{drawnCards:number;cardsInHand:number}>(`/api/leagues/${workspaceId}/game/weeks/${currentWeek}/draw`,{method:'POST'});await refreshGame();setGameMessage(`You drew ${result.drawnCards} card${result.drawnCards===1?'':'s'}. Your hand now has ${result.cardsInHand}.`)}
     catch(error){setGameMessage((error as Error).message)}
   }
 
-  if (screen === 'weekly') return <div className="app-shell"><button className="weekly-back" onClick={()=>setScreen('home')}>← BACK TO MY TEAM</button><WeeklyCardSeason leagueId={workspaceId} cards={weeklyCards} currentWeek={1} canEdit={viewerIsPrimary||cardPermissions.includes('edit_card_rules')} onSaved={saved=>setWeeklyCards(current=>[...current.filter(card=>card.week!==saved.week),saved].sort((a,b)=>a.week-b.week))}/><nav className="mobile-bottom-nav" aria-label="Main navigation"><button onClick={()=>setScreen('home')}><b>⌂</b><span>My Team</span></button><button onClick={()=>setScreen('room')}><b>VS</b><span>Matchups</span></button><button className="active"><b>★</b><span>Weekly</span></button><button onClick={()=>setScreen('library')}><b>▣</b><span>Cards</span></button>{canCreateCards&&<button onClick={()=>setScreen('admin')}><b>＋</b><span>Create</span></button>}</nav></div>
+  if (screen === 'weekly') return <div className="app-shell"><button className="weekly-back" onClick={()=>setScreen('home')}>← BACK TO MY TEAM</button><WeeklyCardSeason leagueId={workspaceId} cards={weeklyCards} currentWeek={currentWeek} canEdit={viewerIsPrimary||cardPermissions.includes('edit_card_rules')} onSaved={saved=>setWeeklyCards(current=>[...current.filter(card=>card.week!==saved.week),saved].sort((a,b)=>a.week-b.week))}/><nav className="mobile-bottom-nav" aria-label="Main navigation"><button onClick={()=>setScreen('home')}><b>⌂</b><span>My Team</span></button><button onClick={()=>setScreen('room')}><b>VS</b><span>Matchups</span></button><button className="active"><b>★</b><span>Weekly</span></button><button onClick={()=>setScreen('library')}><b>▣</b><span>Cards</span></button>{canCreateCards&&<button onClick={()=>setScreen('admin')}><b>＋</b><span>Create</span></button>}</nav></div>
 
   return <div className="app-shell">
     <button className="weekly-nav-button" onClick={()=>setScreen('weekly')}>WEEKLY CARDS · VIEW THE SEASON</button>
@@ -481,10 +486,10 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
     <header><button className="brand" onClick={() => {setScreen('home');setActiveNav('')}}><b>CC</b><span>CHAOS CARDS<small>FANTASY FOOTBALL</small></span></button><nav><button className={screen==='home'?'active':''} onClick={()=>{setScreen('home');setActiveNav('')}}>My Team</button>{['League Room','Standings','Card Library','History'].map(n => <button className={activeNav===n?'active':''} onClick={() => {setActiveNav(n); setScreen(n==='Card Library'?'library':'room')}} key={n}>{n}</button>)}</nav><div className="admin-actions">{viewerIsPrimary&&<button className="admin-link roster-link" onClick={()=>{setScreen('rosters');setActiveNav('')}}>⇄ ROSTERS</button>}{viewerIsPrimary&&<button className="admin-link commissioner-link" onClick={()=>{setScreen('permissions');setActiveNav('')}}>♛ COMMISSIONERS</button>}{canCreateCards&&<button className="admin-link creator-link" onClick={()=>{setScreen('admin');setActiveNav('')}}>⚙ CARD CREATOR</button>}<button className="admin-link signout-link" title={account?.email} onClick={logout}>Sign out</button></div><div className="week"><span>{viewerTeam?.name || account?.name || 'MY TEAM'}</span><b className={revealed?'':'preweek'}>{revealed?'REVEALED':'PRE-WEEK'}</b></div><TeamBadge team={viewerTeam || home} small /></header>
     {gameWeek?.canDraw&&<div className="setup-message draw-message"><b>YOUR WEEKLY DRAW IS READY</b><p>Your unplayed cards carry over. Draw {gameWeek.cardsNeeded||0} new card{gameWeek.cardsNeeded===1?'':'s'} to refill your hand to eight.</p><button className="primary" onClick={drawCards}>DRAW UP TO 8 CARDS</button>{gameMessage&&<small>{gameMessage}</small>}</div>}
     {screen === 'home' ? <main className="team-home"><section className="team-home-hero"><div className="eyebrow">SIGNED IN AS {account?.email}</div><div className="team-home-title"><TeamBadge team={viewerTeam || home}/><div><span>YOUR FANTASY TEAM</span><h1>{viewerTeam?.name || 'Roster connection pending'}</h1><p>{viewerTeam ? `${viewerTeam.manager} · ${viewerTeam.record}` : 'Your commissioner must approve and connect your Sleeper roster.'}</p></div></div><button className="primary enter-league" onClick={()=>{setScreen('room');setActiveNav('League Room')}}>ENTER LEAGUE ROOM →</button></section><section className="home-summary"><article><span>WEEK 1 MATCHUP</span><strong>{viewerTeam?.score.toFixed(1) || '—'}</strong><p>Sleeper points</p></article><article><span>YOUR CHAOS SCORE</span><strong>{viewerTeam?.chaos.toFixed(1) || '—'}</strong><p>After card effects</p></article><article><span>CARDS IN HAND</span><strong>{viewerTeam?.hand ?? 0}</strong><p>Ready to inspect and play</p></article><article><span>ROSTER STATUS</span><strong className="status-word">{viewerTeam?'CONNECTED':'PENDING'}</strong><p>{viewerTeam?'FantasyTools account linked':'Waiting for commissioner'}</p></article></section><section className="home-panels"><article><div className="section-title"><h3>YOUR CARDS</h3><span>{cards.length} AVAILABLE</span></div><div className="home-card-fan">{cards.slice(0,3).map(card=><ChaosCard card={card} compact key={card.id}/>)}</div><button onClick={()=>{setScreen('battle');setActiveNav('')}}>VIEW HAND & PLAY CARDS →</button></article><article><div className="section-title"><h3>YOUR STARTING ROSTER</h3><span>WEEK 1</span></div>{lineupFor(viewerTeam?.id || home.id,0).slice(0,5).map(player=><div className="home-player" key={`${player.position}-${player.name}`}><b>{player.position}</b><span>{player.name}<small>{player.nflTeam} · vs {player.opponent}</small></span><strong>{player.points.toFixed(1)}</strong></div>)}<button onClick={()=>{setScreen('battle');setActiveNav('')}}>VIEW FULL MATCHUP →</button></article></section></main> : screen === 'rosters' ? <RosterAssignments teams={teamData} assignments={rosterAssignments} claims={rosterClaims} leagueId={workspaceId} onSave={saveRosterAssignment} onRemove={removeRosterAssignment} onReview={reviewRosterClaim}/> : screen === 'permissions' ? <CommissionerAccess teams={teamData} grants={permissionGrants} onChange={updatePermissionGrants} leagueId={workspaceId}/> : screen === 'admin' && canCreateCards ? <CardCreator initialCard={editingCard} onSave={saveUploadedCard} onCancel={()=>{setEditingCard(null);setScreen('library');setActiveNav('Card Library')}}/> : screen === 'library' ? <SharedCardLibrary uploaded={uploadedCards} onCreate={()=>{if(canCreateCards){setEditingCard(null);setScreen('admin');setActiveNav('')}}} onEdit={card=>{if(canCreateCards){setEditingCard(card);setScreen('admin');setActiveNav('')}}} onStatus={updateCardStatus} onDelete={deleteUploadedCard}/> : screen === 'room' ? <main className="room">
-      <section className="room-hero"><div><div className="eyebrow">{leagueName} · WEEK 1</div><h1>League Room</h1><p>{sleeperStatus === 'live' ? gameWeek?.sleeperStatus==='pre_draft'?'SLEEPER CONNECTED · WAITING FOR THE DRAFT':'LIVE SLEEPER ROSTERS, MATCHUPS, LINEUPS, AND SCORES' : sleeperStatus === 'loading' ? 'IMPORTING YOUR SLEEPER LEAGUE…' : 'SLEEPER IS TEMPORARILY UNAVAILABLE'}</p></div><div className="deadline"><span>THURSDAY CARD LOCK</span><strong>{revealed ? 'CARDS REVEALED' : gameWeek?.deadlineUtc?new Date(gameWeek.deadlineUtc).toLocaleString():'NOT SCHEDULED'}</strong>{viewerIsPrimary&&<button onClick={toggleReveal}>{revealed ? 'CARDS ARE VISIBLE' : 'COMMISSIONER: LOCK & REVEAL'}</button>}</div></section>
+      <section className="room-hero"><div><div className="eyebrow">{leagueName} · WEEK {currentWeek}</div><h1>League Room</h1><p>{sleeperStatus === 'live' ? gameWeek?.sleeperStatus==='pre_draft'?'SLEEPER CONNECTED · WAITING FOR THE DRAFT':'LIVE SLEEPER ROSTERS, MATCHUPS, LINEUPS, AND SCORES' : sleeperStatus === 'loading' ? 'IMPORTING YOUR SLEEPER LEAGUE…' : 'SLEEPER IS TEMPORARILY UNAVAILABLE'}</p></div><div className="deadline"><span>THURSDAY CARD LOCK</span><strong>{revealed ? 'CARDS REVEALED' : gameWeek?.deadlineUtc?new Date(gameWeek.deadlineUtc).toLocaleString():'NOT SCHEDULED'}</strong>{viewerIsPrimary&&<button onClick={toggleReveal}>{revealed ? 'CARDS ARE VISIBLE' : 'COMMISSIONER: LOCK & REVEAL'}</button>}</div></section>
       {gameWeek?.sleeperStatus==='pre_draft'&&<div className="setup-message">Sleeper is connected. Team managers are ready, and drafted players will appear automatically after the draft.</div>}
-      {viewerIsPrimary&&gameWeek?.status==='setup'&&<div className="setup-message"><b>WEEK 1 IS NOT OPEN YET</b><p>Finish and activate at least eight cards with artwork, then let every player draw their own weekly cards.</p><button className="primary" onClick={dealWeek}>OPEN WEEK 1 FOR DRAWING</button>{gameMessage&&<small>{gameMessage}</small>}</div>}
-      <div className="ticker"><b>LIVE CHAOS</b><span>⚡ Stephen played CRUSHING BLOW</span><span>•</span><span>Jordan’s score jumps +7.5</span><span>•</span><span>🛡 LOCKDOWN activated</span></div>
+      {viewerIsPrimary&&gameWeek?.status==='setup'&&<div className="setup-message"><b>WEEK {currentWeek} IS NOT OPEN YET</b><p>Finish and activate at least eight cards with artwork, then let every player draw their own weekly cards.</p><button className="primary" onClick={dealWeek}>OPEN WEEK {currentWeek} FOR DRAWING</button>{gameMessage&&<small>{gameMessage}</small>}</div>}
+      {log.length>0&&<div className="ticker"><b>LIVE CHAOS</b>{log.slice(0,3).map((entry,index)=><span key={`${entry[0]}-${index}`}>{entry[1]} {entry[2]}</span>)}</div>}
       <section className="matchup-grid">{[0,2,4,6,8].map((i, index) => { const a=teamData[i], b=teamData[i+1]; if (!a || !b) return null; return <article className={`matchup ${index===0?'featured':''}`} key={a.id} onClick={() => {setActiveMatchup(index);setScreen('battle')}}>
         <div className="matchup-top"><span>{index===0?'🔥 FEATURED BATTLE':`MATCHUP ${index+1}`}</span><b>{index < 2 ? 'LIVE' : 'SUN 4:25'}</b></div>
         <div className="versus-row"><div><TeamBadge team={a}/><strong>{a.name}</strong><small>{a.manager} · {a.record}</small></div><div className="scores"><span>{a.score.toFixed(1)} <i>SLEEPER</i></span><b>{a.chaos.toFixed(1)}</b><em>VS</em><b>{b.chaos.toFixed(1)}</b><span>{b.score.toFixed(1)} <i>SLEEPER</i></span></div><div><TeamBadge team={b}/><strong>{b.name}</strong><small>{b.manager} · {b.record}</small></div></div>
@@ -493,15 +498,15 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
       </article>})}</section>
     </main> : <main className="battle">
       <button className="back" onClick={() => setScreen('room')}>← BACK TO LEAGUE ROOM</button>
-      <LineupComparison home={home} away={away} left={syncedLineup(home.id,0)} right={syncedLineup(away.id,1)}/>
+      <LineupComparison home={home} away={away} week={currentWeek} left={syncedLineup(home.id,0)} right={syncedLineup(away.id,1)}/>
       <section className="battle-board">
         <div className="combatant left"><TeamBadge team={home}/><div><small>{home.manager} · {home.record}</small><h2>{home.name}</h2></div><div className="score-block"><span>SLEEPER {home.score.toFixed(1)}</span><strong>{chaos.toFixed(1)}</strong><b>CHAOS SCORE</b></div></div>
-        <div className="vs-burst">VS<small>WEEK 1 · {revealed?'REVEALED':'PRE-WEEK'}</small></div>
+        <div className="vs-burst">VS<small>WEEK {currentWeek} · {revealed?'REVEALED':'PRE-WEEK'}</small></div>
         <div className="combatant right"><div className="score-block"><span>SLEEPER {away.score.toFixed(1)}</span><strong>{away.chaos.toFixed(1)}</strong><b>CHAOS SCORE</b></div><div><small>{away.manager} · {away.record}</small><h2>{away.name}</h2></div><TeamBadge team={away}/></div>
         <div className="field">
           <div className="effect-zone"><span>YOUR ACTIVE EFFECTS · LOCKED</span>{played.length?played.map(c => <ChaosCard key={c.id} card={c} compact />):<div className="empty-effects">NO LOCKED EFFECTS</div>}</div>
           <div className="calculation"><span>CHAOS CALCULATION</span><div><p>Sleeper score <b>{home.score.toFixed(2)}</b></p>{played.some(c=>c.id===2)&&<p className="positive">End Zone Fever <b>+6.20</b></p>}{played.some(c=>c.id===5)&&<p className="positive">Hail Mary <b>+8.00</b></p>}{played.some(c=>c.id===1)&&<p className="negative">Crushing Blow <b>−7.10</b></p>}{!played.length&&<p className="waiting-math">Waiting for Thursday reveal…</p>}<strong>CHAOS SCORE <b>{chaos.toFixed(2)}</b></strong></div></div>
-          <div className="effect-zone enemy"><span>OPPONENT EFFECTS</span>{revealed?<><ChaosCard card={cards[0]} compact/><ChaosCard card={cards[2]} compact/></>:<><div className="card-back">?</div><div className="card-back">?</div></>}</div>
+          <div className="effect-zone enemy"><span>OPPONENT EFFECTS</span>{revealed?<div className="empty-effect">Revealed opponent selections load from the server.</div>:<><div className="card-back">?</div><div className="card-back">?</div><div className="card-back">?</div><div className="card-back">?</div></>}</div>
         </div>
       </section>
       <section className="battle-lower"><div className="log"><div className="section-title"><h3>GAME LOG</h3><span>LOCKED ACTIONS</span></div>{log.map((x,i)=><div className="log-row" key={i}><time>{x[0]}</time><i>{x[1]}</i><p>{x[2]}</p></div>)}</div><aside>{!revealed && <div className="pending-zone"><div className="section-title"><h3>YOUR WEEKLY PICKS</h3><span>{pending.length} / 4 · UNLOCKED</span></div><div className="pick-slots"><span className={pending.some(c=>c.category==='BOOST')?'filled':''}>BOOST {pending.some(c=>c.category==='BOOST')?'✓':'0/1'}</span><span className={pending.some(c=>c.category==='ATTACK')?'filled':''}>ATTACK {pending.some(c=>c.category==='ATTACK')?'✓':'0/1'}</span><span className={pending.filter(c=>c.category==='UNIQUE').length===2?'filled':''}>UNIQUE {pending.filter(c=>c.category==='UNIQUE').length}/2</span></div>{pending.length===0?<p>Tap a card to inspect it, then choose Select This Card.</p>:<div className="pending-list">{pending.map(card=><div key={card.id}><ChaosCard card={card} compact/><button onClick={()=>returnToHand(card)}>↩ RETURN TO HAND</button></div>)}</div>}</div>}<div className="section-title"><h3>YOUR HAND</h3><span>{handCards.filter(c=>!played.some(p=>p.id===c.id)&&!pending.some(p=>p.id===c.id)).length} CARDS · TAP TO INSPECT</span></div><div className="hand">{handCards.filter(c=>!played.some(p=>p.id===c.id)&&!pending.some(p=>p.id===c.id)).map(c=><ChaosCard key={c.id} card={c} selected={selected.includes(c.id)} onClick={()=>setInspecting(c)}/>)}</div></aside></section>
