@@ -1,5 +1,5 @@
 export type Category = 'ATTACK' | 'BOOST' | 'UNIQUE'
-export type Card = { id: number; name: string; category: Category; amount: number; target: string; copy: string; icon: string }
+export type Card = { id: number; copyId?: string; serverId?: string; artworkUrl?: string; name: string; category: Category; amount: number; target: string; copy: string; icon: string }
 
 /** The starter deck. Also what the sign-in screen fans out behind the form. */
 export const cards: Card[] = [
@@ -16,7 +16,7 @@ export const cards: Card[] = [
 export function ChaosCard({ card, selected, compact, onClick }: { card: Card; selected?: boolean; compact?: boolean; onClick?: () => void }) {
   return <button className={`chaos-card ${card.category.toLowerCase()} ${selected ? 'selected' : ''} ${compact ? 'compact' : ''}`} onClick={onClick} type="button">
     <div className="card-rarity">CHAOS • COMMON</div>
-    <div className="card-art"><span>{card.icon}</span><i /></div>
+    <div className="card-art">{card.artworkUrl ? <img src={card.artworkUrl} alt={`${card.name} artwork`} /> : <span>{card.icon}</span>}<i /></div>
     <div className="card-name">{card.name}</div>
     <div className="card-category">{card.category}</div>
     {!compact && <><p>{card.copy}</p><div className="card-target">TARGET · {card.target}</div></>}

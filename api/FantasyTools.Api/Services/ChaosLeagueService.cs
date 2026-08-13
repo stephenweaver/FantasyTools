@@ -45,6 +45,7 @@ public class ChaosLeagueService(IFileService fileService) : IChaosLeagueService
             await fileService.Upsert(new UserChaosLeagueDocument { UserId = userId, LeagueId = leagueId, At = now });
             await fileService.Upsert(new LeagueRosterDocument { LeagueId = leagueId, PrimaryCommissionerUserId = userId, At = now });
             await fileService.Upsert(new CardWorkspaceDocument { LeagueId = leagueId, PrimaryCommissionerUserId = userId, At = now });
+            await fileService.Upsert(new LeagueGameDocument { LeagueId = leagueId, SleeperLeagueId = sleeperLeagueId, At = now });
             return league;
         }
         finally { gate.Release(); }

@@ -38,6 +38,11 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<ICardWorkspaceService, CardWorkspaceService>();
         services.AddSingleton<ILeagueRosterService, LeagueRosterService>();
         services.AddSingleton<IChaosLeagueService, ChaosLeagueService>();
+        services.AddHttpClient<ILeagueGameService, LeagueGameService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("FantasyTools-ChaosCards/1.0");
+        });
 
         // Card artwork. R2 vs local disk is decided by IMAGE_SERVICE / IMAGES_* the same way the
         // document store is decided by FILE_SERVICE / R2_*.

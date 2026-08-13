@@ -1,0 +1,11 @@
+namespace FantasyTools.Api.Models;
+
+public class SaveSelectionRequest
+{
+    public string CopyId { get; set; }
+    public string TargetRosterId { get; set; }
+    public string TargetPlayerId { get; set; }
+    public string TargetSlot { get; set; }
+}
+
+public class SetWeekDeadlineRequest { public DateTime DeadlineUtc { get; set; } }

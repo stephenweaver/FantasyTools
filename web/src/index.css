@@ -46,6 +46,8 @@
   .access-layout{gap:12px}.manager-list,.permission-panel{padding:12px}.manager-list{display:flex;overflow-x:auto;max-height:none;gap:8px}.manager-list h3{display:none}.manager-list>button{flex:0 0 190px;border:1px solid #2d362e}.permission-person{align-items:flex-start}.permission-person>.team-badge{width:44px;height:44px}.permission-person h2{font-size:22px}.permission-person>b{font-size:6px;text-align:right}.permission-list label{min-height:72px;padding:12px}.permission-list label span small{font-size:9px}.access-summary{display:block}.access-summary span{display:block;margin-top:5px}
 }
 
+.card-art img{width:100%;height:100%;object-fit:cover;display:block}
+
 /* First-run league creation */
 .league-onboarding{min-height:100vh;background:radial-gradient(circle at 20% 10%,rgba(126,255,75,.12),transparent 32%),#070c08;color:#f4f7f1;display:grid;place-items:center;padding:48px 20px;position:relative}
 .onboarding-brand{position:absolute;left:32px;top:28px;display:flex;align-items:center;gap:12px;font-family:var(--display);letter-spacing:.08em}
