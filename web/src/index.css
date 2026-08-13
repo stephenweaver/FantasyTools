@@ -51,6 +51,7 @@
 .library-art{width:100%;height:auto;aspect-ratio:2/3;background:#070907;display:grid;place-items:center}
 .library-art img{display:block;width:100%;height:100%;object-fit:contain}
 @media(max-width:900px){.library-art{height:auto;aspect-ratio:2/3}}
+.paste-artwork-row{display:flex;align-items:center;gap:14px;margin-top:12px}.paste-artwork-button{min-height:46px}.paste-artwork-row small{color:#768077;font:700 7px/1.5 Inter;letter-spacing:.1em}@media(max-width:600px){.paste-artwork-row{display:grid;gap:8px}.paste-artwork-button{width:100%;min-height:52px}.paste-artwork-row small{text-align:center}}
 
 .card-art img{width:100%;height:100%;object-fit:cover;display:block}
 

@@ -144,6 +144,28 @@ function CardCreator({ initialCard, onSave, onCancel }: { initialCard: UploadedC
     finally { setUploading(false) }
   }
 
+  const pasteArtwork = async () => {
+    try {
+      if (!navigator.clipboard?.read) throw new Error('This browser does not allow the Paste Image button. Press Ctrl+V here or use Choose Image instead.')
+      const items = await navigator.clipboard.read()
+      for (const item of items) {
+        const imageType = item.types.find(type => type.startsWith('image/'))
+        if (!imageType) continue
+        const blob = await item.getType(imageType)
+        await upload(new File([blob], `pasted-card.${imageType.split('/')[1] || 'png'}`, { type:imageType }))
+        return
+      }
+      setError('There is no image in your clipboard. Copy the card image first, then try again.')
+    } catch (ex) { setError((ex as Error).message || 'The browser could not read an image from your clipboard.') }
+  }
+
+  const handleArtworkPaste = (event: React.ClipboardEvent) => {
+    const image = Array.from(event.clipboardData.items).find(item => item.type.startsWith('image/'))?.getAsFile()
+    if (!image) return
+    event.preventDefault()
+    upload(image)
+  }
+
   const save = async (submitForReview: boolean) => {
     if (!name.trim() && !artwork) { setError('Add a working name or artwork before saving this draft.'); return }
     if (submitForReview && (!name.trim() || !description.trim() || !artwork)) { setError('A name, artwork, and complete game-rules summary are required before review.'); return }
@@ -153,10 +175,10 @@ function CardCreator({ initialCard, onSave, onCancel }: { initialCard: UploadedC
     } catch (ex) { setError((ex as Error).message) }
   }
 
-  return <main className="admin-page"><div className="admin-heading"><div><div className="eyebrow">SHARED COMMISSIONER WORKSPACE</div><h1>{initialCard ? 'Edit Card Draft' : 'Card Creator'}</h1><p>Save artwork and ideas now. Finish the engine rules together before approving the card for the deck.</p></div><button className="secondary" onClick={onCancel}>VIEW CARD LIBRARY →</button></div>
+  return <main className="admin-page" onPaste={handleArtworkPaste}><div className="admin-heading"><div><div className="eyebrow">SHARED COMMISSIONER WORKSPACE</div><h1>{initialCard ? 'Edit Card Draft' : 'Card Creator'}</h1><p>Save artwork and ideas now. Finish the engine rules together before approving the card for the deck.</p></div><button className="secondary" onClick={onCancel}>VIEW CARD LIBRARY →</button></div>
     <div className="creator-layout"><section className="creator-form">
       <div className="form-section"><h3>01 · CARD IDENTITY & SEARCH DATA</h3><div className="form-grid"><label className="wide">CARD NAME<input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Crushing Blow" /></label><label>CATEGORY<select value={category} onChange={e=>setCategory(e.target.value as Category)}><option>ATTACK</option><option>BOOST</option><option>UNIQUE</option></select></label><label>RARITY<select value={rarity} onChange={e=>setRarity(e.target.value)}><option>Common</option><option>Uncommon</option><option>Rare</option><option>Legendary</option></select></label><label className="wide">RULES SUMMARY FOR THE GAME LOG<textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Store the card effect as searchable text. This will not be printed over the artwork." /></label></div></div>
-      <div className="form-section"><h3>02 · COMPLETE FINISHED CARD</h3><label className={`upload-zone ${artwork?'has-art':''}`}><input type="file" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={e=>upload(e.target.files?.[0])}/>{uploading?<><b>⋯</b><strong>UPLOADING…</strong><span>SENDING THE IMAGE TO THE CARD IMAGE STORE</span></>:artwork?<><img src={artwork}/><span>CHOOSE A DIFFERENT FINISHED CARD</span></>:<><b>↑</b><strong>UPLOAD THE COMPLETE CARD IMAGE</strong><span>NAME, ARTWORK AND PRINTED DESCRIPTION SHOULD ALREADY BE INCLUDED</span></>}</label></div>
+      <div className="form-section"><h3>02 · COMPLETE FINISHED CARD</h3><label className={`upload-zone ${artwork?'has-art':''}`}><input type="file" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={e=>upload(e.target.files?.[0])}/>{uploading?<><b>⋯</b><strong>UPLOADING…</strong><span>SENDING THE IMAGE TO THE CARD IMAGE STORE</span></>:artwork?<><img src={artwork}/><span>CHOOSE A DIFFERENT FINISHED CARD</span></>:<><b>↑</b><strong>CHOOSE THE COMPLETE CARD IMAGE</strong><span>UPLOAD FROM PHOTOS/FILES, OR PASTE AN IMAGE BELOW</span></>}</label><div className="paste-artwork-row"><button type="button" className="secondary paste-artwork-button" disabled={uploading} onClick={pasteArtwork}>PASTE IMAGE FROM CLIPBOARD</button><small>DESKTOP: YOU CAN ALSO PRESS CTRL+V ANYWHERE ON THIS PAGE</small></div></div>
       <div className="form-section"><h3>03 · GAME RULES</h3><div className="form-grid"><label>TARGET TYPE<select value={target} onChange={e=>setTarget(e.target.value)}><option>Opponent QB slot</option><option>Opponent RB1 slot</option><option>Opponent WR1 slot</option><option>Your QB slot</option><option>Your WR1 slot</option><option>Your team</option><option>Opponent team</option><option>Dynamic target</option></select></label><label>EFFECT TYPE<select value={effectType} onChange={e=>setEffectType(e.target.value)}><option>Percentage decrease</option><option>Percentage increase</option><option>Add flat points</option><option>Subtract flat points</option><option>Block attack</option><option>Reduce attack</option><option>Referenced player replaces slot</option><option>Custom handler</option></select></label>{effectType === 'Referenced player replaces slot' ? <><label>SCORE SOURCE PLAYER<input value={sourcePlayer} onChange={e=>setSourcePlayer(e.target.value)} placeholder="Patrick Mahomes" /></label><label>SLEEPER PLAYER ID<input value={sourcePlayerId} onChange={e=>setSourcePlayerId(e.target.value)} placeholder="4046" /></label><label>DESTINATION SLOT<select value={destinationSlot} onChange={e=>setDestinationSlot(e.target.value)}><option>Your starting QB slot</option><option>Your starting RB1 slot</option><option>Your starting WR1 slot</option><option>Your starting TE slot</option><option>Your Flex slot</option></select></label><label>SCORE MULTIPLIER<input type="number" step="0.25" value={multiplier} onChange={e=>setMultiplier(Number(e.target.value))}/></label><div className="resolution-example wide"><b>RESOLUTION FORMULA</b><code>Chaos team score − actual slot points + ({sourcePlayer || 'source player'} points × {multiplier})</code><small>The source player does not need to be on the manager’s roster.</small></div></> : <label>EFFECT AMOUNT<input type="number" value={amount} onChange={e=>setAmount(Number(e.target.value))}/></label>}<label>COPIES IN DECK<input type="number" min="1" max="99" value={copies} onChange={e=>setCopies(Number(e.target.value))}/></label><label className="check wide"><input type="checkbox" checked={special} onChange={e=>setSpecial(e.target.checked)}/><span><b>SPECIAL CARD</b><small>Marks this card as unusual or powerful. Draw odds are unchanged.</small></span></label></div></div>
       <div className="form-section"><h3>COMMISSIONER NOTES</h3><div className="form-grid"><label className="wide">BRAINSTORMING, QUESTIONS, AND TODO ITEMS<textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Example: Confirm the timing. Stephen will finish the multiplier." /></label></div></div>
       {error && <div className="form-error">⚠ {error}</div>}<div className="draft-actions"><button className="secondary" disabled={uploading} onClick={()=>save(false)}>SAVE DRAFT</button><button className="primary save-card" disabled={uploading} onClick={()=>save(true)}>SUBMIT FOR REVIEW <span>→</span></button></div>
