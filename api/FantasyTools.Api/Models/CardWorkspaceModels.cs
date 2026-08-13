@@ -24,6 +24,17 @@ public class SaveCardDraftRequest
 }
 
 public class ChangeCardStatusRequest { public string Status { get; set; } }
+public class SaveWeeklyCardRequest
+{
+    public int Week { get; set; }
+    public string Name { get; set; }
+    public string ArtworkUrl { get; set; }
+    public string Description { get; set; }
+    public string RuleType { get; set; }
+    public decimal Amount { get; set; }
+    public string Target { get; set; }
+    public bool Active { get; set; } = true;
+}
 public class ChangeCardCollaboratorRequest
 {
     public string UserId { get; set; }

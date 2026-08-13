@@ -26,6 +26,16 @@ public class CardWorkspaceController(ICardWorkspaceService service) : Controller
     [HttpPut("collaborators")]
     public async Task<ActionResult> SetCollaborator(string leagueId, [FromBody] ChangeCardCollaboratorRequest request) => await Run(async () => { await service.SetCollaborator(leagueId, UserId, request); return new { saved = true }; });
 
+    [HttpPut("weekly/{week:int}")]
+    public async Task<ActionResult> SaveWeekly(string leagueId, int week, [FromBody] SaveWeeklyCardRequest request)
+    {
+        request.Week = week;
+        return await Run(() => service.SaveWeeklyCard(leagueId, UserId, UserName, request));
+    }
+
+    [HttpDelete("weekly/{week:int}")]
+    public async Task<ActionResult> DeleteWeekly(string leagueId, int week) => await Run(async () => { await service.DeleteWeeklyCard(leagueId, week, UserId); return new { deleted = true }; });
+
     private string UserId => User.FindFirstValue(ClaimTypes.NameIdentifier);
     private string UserName => User.FindFirstValue(ClaimTypes.Name) ?? "Commissioner";
 

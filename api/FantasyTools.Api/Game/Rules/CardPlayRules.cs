@@ -18,19 +18,31 @@ public sealed class CardPlayRules : ICardPlayRules
         if (!state.TargetIsAllowed)
             return RuleDecision.Reject("invalid_target", "This card cannot affect the selected target.");
 
-        if (request.Timing == CardTiming.PreWeek)
-        {
-            if (state.Status != WeekStatus.SelectionOpen || request.RequestedAt >= state.Deadline)
-                return RuleDecision.Reject("selection_locked", "Pre-week selections are locked.");
-            if (state.ExistingPreWeekSelections >= 2)
-                return RuleDecision.Reject("preweek_limit", "A manager may select at most two pre-week cards.");
-            return RuleDecision.Permit();
-        }
+        if (state.Status != WeekStatus.SelectionOpen || request.RequestedAt >= state.Deadline)
+            return RuleDecision.Reject("selection_locked", "Weekly card selections are locked.");
+        if (state.ExistingPreWeekSelections >= 4)
+            return RuleDecision.Reject("weekly_limit", "A manager selects exactly four cards each week.");
 
-        if (state.Status is not (WeekStatus.Revealed or WeekStatus.Live))
-            return RuleDecision.Reject("live_closed", "Live card play is not open.");
-        if (state.ExistingLivePlays >= 1)
-            return RuleDecision.Reject("live_limit", "The manager has already used the one live card allowed this week.");
+        var normalized = Normalize(request.Category);
+        var selected = state.SelectedCategories.Select(Normalize).ToList();
+        var limit = normalized == CardCategory.Unique ? 2 : 1;
+        if (selected.Count(category => category == normalized) >= limit)
+            return RuleDecision.Reject("category_limit", normalized == CardCategory.Unique
+                ? "Only two Unique cards may be selected."
+                : $"Only one {normalized} card may be selected.");
         return RuleDecision.Permit();
     }
+
+    public static RuleDecision ValidateCompleteSelection(IReadOnlyList<CardCategory> categories)
+    {
+        var normalized = categories.Select(Normalize).ToList();
+        return normalized.Count == 4 && normalized.Count(c => c == CardCategory.Boost) == 1
+            && normalized.Count(c => c == CardCategory.Attack) == 1
+            && normalized.Count(c => c == CardCategory.Unique) == 2
+            ? RuleDecision.Permit()
+            : RuleDecision.Reject("invalid_weekly_mix", "Select exactly 1 Boost, 1 Attack, and 2 Unique cards.");
+    }
+
+    private static CardCategory Normalize(CardCategory category) =>
+        category == CardCategory.Defense ? CardCategory.Unique : category;
 }

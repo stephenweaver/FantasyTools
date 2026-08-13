@@ -3,13 +3,14 @@ import { apiFetch } from './lib/api'
 import { useAuth } from './lib/auth'
 import { cards, ChaosCard, type Card, type Category } from './lib/cards'
 import { cardDataIdeas, toDraftRequest } from './lib/cardDataIdeas'
+import { WeeklyCardSeason, type WeeklyCard } from './lib/weeklyCards'
 
 type Team = { id: number; manager: string; name: string; initials: string; record: string; score: number; chaos: number; hand: number; accent: string; sleeperUserId?: string }
 type LineupPlayer = { name: string; position: string; nflTeam: string; opponent: string; game: string; projection: number; points: number; stats: string; status?: string }
 type RosterAssignment = { rosterId: number; sleeperUserId: string; sleeperManagerName: string; sleeperTeamName: string; fantasyToolsUserId?: string; fantasyToolsEmail: string; fantasyToolsName?: string }
 type RosterClaim = { id: string; rosterId: number; sleeperManagerName: string; sleeperTeamName: string; fantasyToolsName: string; fantasyToolsEmail: string; status: string }
 type RosterWorkspace = { primaryCommissionerUserId: string; assignments: RosterAssignment[]; claims: RosterClaim[] }
-type CardWorkspaceAccess = { cards: any[]; collaborators?: { userId:string; permissions:string[] }[] }
+type CardWorkspaceAccess = { cards: any[]; weeklyCards?: WeeklyCard[]; collaborators?: { userId:string; permissions:string[] }[] }
 type ChaosLeague = { leagueId: string; sleeperLeagueId: string; name: string; primaryCommissionerUserId: string; createdAt: string }
 type CardStatus = 'IDEA' | 'ARTWORK READY' | 'NEEDS REVIEW' | 'ACTIVE' | 'ARCHIVED'
 type UploadedCard = Card & { serverId?: string; artwork: string; rarity: string; copies: number; active: boolean; status: CardStatus; notes: string; updatedBy: string; updatedAt: string; effectType: string; special: boolean; sourcePlayer?: string; sourcePlayerId?: string; destinationSlot?: string; multiplier?: number }
@@ -149,7 +150,7 @@ function CardCreator({ initialCard, onSave, onCancel }: { initialCard: UploadedC
 
   return <main className="admin-page"><div className="admin-heading"><div><div className="eyebrow">SHARED COMMISSIONER WORKSPACE</div><h1>{initialCard ? 'Edit Card Draft' : 'Card Creator'}</h1><p>Save artwork and ideas now. Finish the engine rules together before approving the card for the deck.</p></div><button className="secondary" onClick={onCancel}>VIEW CARD LIBRARY →</button></div>
     <div className="creator-layout"><section className="creator-form">
-      <div className="form-section"><h3>01 · CARD IDENTITY & SEARCH DATA</h3><div className="form-grid"><label className="wide">CARD NAME<input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Crushing Blow" /></label><label>CATEGORY<select value={category} onChange={e=>setCategory(e.target.value as Category)}><option>ATTACK</option><option>BOOST</option><option>DEFENSE</option></select></label><label>RARITY<select value={rarity} onChange={e=>setRarity(e.target.value)}><option>Common</option><option>Uncommon</option><option>Rare</option><option>Legendary</option></select></label><label className="wide">RULES SUMMARY FOR THE GAME LOG<textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Store the card effect as searchable text. This will not be printed over the artwork." /></label></div></div>
+      <div className="form-section"><h3>01 · CARD IDENTITY & SEARCH DATA</h3><div className="form-grid"><label className="wide">CARD NAME<input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Crushing Blow" /></label><label>CATEGORY<select value={category} onChange={e=>setCategory(e.target.value as Category)}><option>ATTACK</option><option>BOOST</option><option>UNIQUE</option></select></label><label>RARITY<select value={rarity} onChange={e=>setRarity(e.target.value)}><option>Common</option><option>Uncommon</option><option>Rare</option><option>Legendary</option></select></label><label className="wide">RULES SUMMARY FOR THE GAME LOG<textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Store the card effect as searchable text. This will not be printed over the artwork." /></label></div></div>
       <div className="form-section"><h3>02 · COMPLETE FINISHED CARD</h3><label className={`upload-zone ${artwork?'has-art':''}`}><input type="file" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={e=>upload(e.target.files?.[0])}/>{uploading?<><b>⋯</b><strong>UPLOADING…</strong><span>SENDING THE IMAGE TO THE CARD IMAGE STORE</span></>:artwork?<><img src={artwork}/><span>CHOOSE A DIFFERENT FINISHED CARD</span></>:<><b>↑</b><strong>UPLOAD THE COMPLETE CARD IMAGE</strong><span>NAME, ARTWORK AND PRINTED DESCRIPTION SHOULD ALREADY BE INCLUDED</span></>}</label></div>
       <div className="form-section"><h3>03 · GAME RULES</h3><div className="form-grid"><label>TARGET TYPE<select value={target} onChange={e=>setTarget(e.target.value)}><option>Opponent QB slot</option><option>Opponent RB1 slot</option><option>Opponent WR1 slot</option><option>Your QB slot</option><option>Your WR1 slot</option><option>Your team</option><option>Opponent team</option><option>Dynamic target</option></select></label><label>EFFECT TYPE<select value={effectType} onChange={e=>setEffectType(e.target.value)}><option>Percentage decrease</option><option>Percentage increase</option><option>Add flat points</option><option>Subtract flat points</option><option>Block attack</option><option>Reduce attack</option><option>Referenced player replaces slot</option><option>Custom handler</option></select></label>{effectType === 'Referenced player replaces slot' ? <><label>SCORE SOURCE PLAYER<input value={sourcePlayer} onChange={e=>setSourcePlayer(e.target.value)} placeholder="Patrick Mahomes" /></label><label>SLEEPER PLAYER ID<input value={sourcePlayerId} onChange={e=>setSourcePlayerId(e.target.value)} placeholder="4046" /></label><label>DESTINATION SLOT<select value={destinationSlot} onChange={e=>setDestinationSlot(e.target.value)}><option>Your starting QB slot</option><option>Your starting RB1 slot</option><option>Your starting WR1 slot</option><option>Your starting TE slot</option><option>Your Flex slot</option></select></label><label>SCORE MULTIPLIER<input type="number" step="0.25" value={multiplier} onChange={e=>setMultiplier(Number(e.target.value))}/></label><div className="resolution-example wide"><b>RESOLUTION FORMULA</b><code>Chaos team score − actual slot points + ({sourcePlayer || 'source player'} points × {multiplier})</code><small>The source player does not need to be on the manager’s roster.</small></div></> : <label>EFFECT AMOUNT<input type="number" value={amount} onChange={e=>setAmount(Number(e.target.value))}/></label>}<label>COPIES IN DECK<input type="number" min="1" max="99" value={copies} onChange={e=>setCopies(Number(e.target.value))}/></label><label className="check wide"><input type="checkbox" checked={special} onChange={e=>setSpecial(e.target.checked)}/><span><b>SPECIAL CARD</b><small>Marks this card as unusual or powerful. Draw odds are unchanged.</small></span></label></div></div>
       <div className="form-section"><h3>COMMISSIONER NOTES</h3><div className="form-grid"><label className="wide">BRAINSTORMING, QUESTIONS, AND TODO ITEMS<textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Example: Confirm the timing. Stephen will finish the multiplier." /></label></div></div>
@@ -220,7 +221,7 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
   const { user: account, logout } = useAuth()
   const workspaceId = league.leagueId
   const sleeperLeagueId = league.sleeperLeagueId
-  const [screen, setScreen] = useState<'home' | 'room' | 'battle' | 'admin' | 'library' | 'permissions' | 'rosters'>('home')
+  const [screen, setScreen] = useState<'home' | 'room' | 'battle' | 'admin' | 'library' | 'permissions' | 'rosters' | 'weekly'>('home')
   const [selected, setSelected] = useState<number[]>([])
   const [played, setPlayed] = useState<Card[]>([])
   const [pending, setPending] = useState<Card[]>([])
@@ -236,6 +237,7 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
   const [sleeperStatus, setSleeperStatus] = useState<'loading'|'live'|'fallback'>('loading')
   const [uploadedCards, setUploadedCards] = useState<UploadedCard[]>(() => { try { return JSON.parse(localStorage.getItem('chaos-uploaded-cards') || '[]').map((card: UploadedCard) => ({...card,status:card.status || (card.active?'ACTIVE':'ARTWORK READY'),notes:card.notes || '',updatedBy:card.updatedBy || 'Commissioner',updatedAt:card.updatedAt || new Date().toISOString()})) } catch { return [] } })
   const [editingCard, setEditingCard] = useState<UploadedCard | null>(null)
+  const [weeklyCards,setWeeklyCards]=useState<WeeklyCard[]>([])
   const [permissionGrants, setPermissionGrants] = useState<Record<number,string[]>>(() => { try { return JSON.parse(localStorage.getItem('chaos-permission-grants') || '{}') } catch { return {} } })
   const [rosterAssignments, setRosterAssignments] = useState<RosterAssignment[]>(() => { try { return JSON.parse(localStorage.getItem('chaos-roster-assignments') || '[]') } catch { return [] } })
   const [rosterClaims, setRosterClaims] = useState<RosterClaim[]>([])
@@ -274,6 +276,7 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
       .then(workspace => {
         const shared = workspace.cards.map(fromServerCard)
         setUploadedCards(shared)
+        setWeeklyCards(workspace.weeklyCards||[])
         setCardPermissions(workspace.collaborators?.find(item=>item.userId===account?.userId)?.permissions || [])
         localStorage.setItem('chaos-uploaded-cards',JSON.stringify(shared))
         if(account?.userId===league.primaryCommissionerUserId){const existing=new Set(workspace.cards.map(card=>String(card.name).toLowerCase()));const missing=cardDataIdeas.filter(card=>!existing.has(card.name.toLowerCase()));if(missing.length)Promise.all(missing.map(card=>apiFetch(`/api/leagues/${workspaceId}/cards`,{method:'POST',body:JSON.stringify(toDraftRequest(card))}))).then(()=>apiFetch<CardWorkspaceAccess>(`/api/leagues/${workspaceId}/cards`)).then(updated=>{const imported=updated.cards.map(fromServerCard);setUploadedCards(imported);localStorage.setItem('chaos-uploaded-cards',JSON.stringify(imported))}).catch(()=>{})}
@@ -340,8 +343,8 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
 
   const chooseInspectedCard = () => {
     if (!inspecting) return
-    if (revealed && liveCardPlayed) { setToast('Your one live card has already been played this week.'); setInspecting(null); return }
-    if (!revealed && pending.length >= 2) { setToast('You can select at most two pre-week cards.'); setInspecting(null); return }
+    if (revealed) { setToast('All four weekly cards are locked and visible.'); setInspecting(null); return }
+    if (pending.length >= 4) { setToast('Your four weekly card slots are full.'); setInspecting(null); return }
     setSelected([inspecting.id])
     setInspecting(null)
     setTargeting(true)
@@ -360,10 +363,14 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
       setLog(l => [[new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), card.icon, `${home.manager} played ${card.name.toUpperCase()} live against ${away.manager}’s QB slot.`], ...l])
       setToast(`${card.name} slammed onto the table and is now locked!`)
     } else {
-      if (pending.length >= 2) { setTargeting(false); setSelected([]); setToast('You can select at most two pre-week cards.'); return }
+      if (pending.length >= 4) { setTargeting(false); setSelected([]); setToast('Your four weekly card slots are full.'); return }
+      const normalized = card.category
+      const count = pending.filter(item=>item.category===normalized).length
+      const limit = normalized === 'UNIQUE' ? 2 : 1
+      if (count >= limit) { setTargeting(false); setSelected([]); setToast(`Your ${normalized} slots are already full.`); return }
       setPending(p => [...p, card])
       setLog(l => [[new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), '🔒', `${card.name.toUpperCase()} was selected privately. It can be changed before the deadline.`], ...l])
-      setToast(`${card.name} selected privately. You can still return it to your hand.`)
+      setToast(`${card.name} selected. You can still return it to your hand.`)
     }
     setSelected([]); setTargeting(false)
     setTimeout(() => setToast(''), 2800)
@@ -378,6 +385,8 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
 
   const toggleReveal = () => {
     if (!revealed) {
+      const boost=pending.filter(card=>card.category==='BOOST').length,attack=pending.filter(card=>card.category==='ATTACK').length,unique=pending.filter(card=>card.category==='UNIQUE').length
+      if(pending.length!==4||boost!==1||attack!==1||unique!==2){setToast('Select exactly 1 Boost, 1 Attack, and 2 Unique cards.');return}
       setPlayed(current => [...current, ...pending]); setPending([]); setRevealed(true)
       setLog(l => [['NOW', '👁', 'Pre-week selections locked and revealed across the league.'], ...l])
     } else {
@@ -385,7 +394,10 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
     }
   }
 
+  if (screen === 'weekly') return <div className="app-shell"><button className="weekly-back" onClick={()=>setScreen('home')}>← BACK TO MY TEAM</button><WeeklyCardSeason leagueId={workspaceId} cards={weeklyCards} currentWeek={1} canEdit={viewerIsPrimary||cardPermissions.includes('edit_card_rules')} onSaved={saved=>setWeeklyCards(current=>[...current.filter(card=>card.week!==saved.week),saved].sort((a,b)=>a.week-b.week))}/></div>
+
   return <div className="app-shell">
+    <button className="weekly-nav-button" onClick={()=>setScreen('weekly')}>WEEKLY CARDS · VIEW THE SEASON</button>
     <header><button className="brand" onClick={() => {setScreen('home');setActiveNav('')}}><b>CC</b><span>CHAOS CARDS<small>FANTASY FOOTBALL</small></span></button><nav><button className={screen==='home'?'active':''} onClick={()=>{setScreen('home');setActiveNav('')}}>My Team</button>{['League Room','Standings','Card Library','History'].map(n => <button className={activeNav===n?'active':''} onClick={() => {setActiveNav(n); setScreen(n==='Card Library'?'library':'room')}} key={n}>{n}</button>)}</nav><div className="admin-actions">{viewerIsPrimary&&<button className="admin-link roster-link" onClick={()=>{setScreen('rosters');setActiveNav('')}}>⇄ ROSTERS</button>}{viewerIsPrimary&&<button className="admin-link commissioner-link" onClick={()=>{setScreen('permissions');setActiveNav('')}}>♛ COMMISSIONERS</button>}{canCreateCards&&<button className="admin-link creator-link" onClick={()=>{setScreen('admin');setActiveNav('')}}>⚙ CARD CREATOR</button>}<button className="admin-link signout-link" title={account?.email} onClick={logout}>Sign out</button></div><div className="week"><span>{viewerTeam?.name || account?.name || 'MY TEAM'}</span><b className={revealed?'':'preweek'}>{revealed?'REVEALED':'PRE-WEEK'}</b></div><TeamBadge team={viewerTeam || home} small /></header>
     {screen === 'home' ? <main className="team-home"><section className="team-home-hero"><div className="eyebrow">SIGNED IN AS {account?.email}</div><div className="team-home-title"><TeamBadge team={viewerTeam || home}/><div><span>YOUR FANTASY TEAM</span><h1>{viewerTeam?.name || 'Roster connection pending'}</h1><p>{viewerTeam ? `${viewerTeam.manager} · ${viewerTeam.record}` : 'Your commissioner must approve and connect your Sleeper roster.'}</p></div></div><button className="primary enter-league" onClick={()=>{setScreen('room');setActiveNav('League Room')}}>ENTER LEAGUE ROOM →</button></section><section className="home-summary"><article><span>WEEK 1 MATCHUP</span><strong>{viewerTeam?.score.toFixed(1) || '—'}</strong><p>Sleeper points</p></article><article><span>YOUR CHAOS SCORE</span><strong>{viewerTeam?.chaos.toFixed(1) || '—'}</strong><p>After card effects</p></article><article><span>CARDS IN HAND</span><strong>{viewerTeam?.hand ?? 0}</strong><p>Ready to inspect and play</p></article><article><span>ROSTER STATUS</span><strong className="status-word">{viewerTeam?'CONNECTED':'PENDING'}</strong><p>{viewerTeam?'FantasyTools account linked':'Waiting for commissioner'}</p></article></section><section className="home-panels"><article><div className="section-title"><h3>YOUR CARDS</h3><span>{cards.length} AVAILABLE</span></div><div className="home-card-fan">{cards.slice(0,3).map(card=><ChaosCard card={card} compact key={card.id}/>)}</div><button onClick={()=>{setScreen('battle');setActiveNav('')}}>VIEW HAND & PLAY CARDS →</button></article><article><div className="section-title"><h3>YOUR STARTING ROSTER</h3><span>WEEK 1</span></div>{lineupFor(viewerTeam?.id || home.id,0).slice(0,5).map(player=><div className="home-player" key={`${player.position}-${player.name}`}><b>{player.position}</b><span>{player.name}<small>{player.nflTeam} · vs {player.opponent}</small></span><strong>{player.points.toFixed(1)}</strong></div>)}<button onClick={()=>{setScreen('battle');setActiveNav('')}}>VIEW FULL MATCHUP →</button></article></section></main> : screen === 'rosters' ? <RosterAssignments teams={teamData} assignments={rosterAssignments} claims={rosterClaims} leagueId={workspaceId} onSave={saveRosterAssignment} onRemove={removeRosterAssignment} onReview={reviewRosterClaim}/> : screen === 'permissions' ? <CommissionerAccess teams={teamData} grants={permissionGrants} onChange={updatePermissionGrants} leagueId={workspaceId}/> : screen === 'admin' && canCreateCards ? <CardCreator initialCard={editingCard} onSave={saveUploadedCard} onCancel={()=>{setEditingCard(null);setScreen('library');setActiveNav('Card Library')}}/> : screen === 'library' ? <SharedCardLibrary uploaded={uploadedCards} onCreate={()=>{if(canCreateCards){setEditingCard(null);setScreen('admin');setActiveNav('')}}} onEdit={card=>{if(canCreateCards){setEditingCard(card);setScreen('admin');setActiveNav('')}}} onStatus={updateCardStatus} onDelete={deleteUploadedCard}/> : screen === 'room' ? <main className="room">
       <section className="room-hero"><div><div className="eyebrow">{leagueName} · WEEK 1 DEMO</div><h1>League Room</h1><p>{sleeperStatus === 'live' ? 'REAL SLEEPER TEAMS · DEMO MATCHUPS AND SCORES' : sleeperStatus === 'loading' ? 'IMPORTING YOUR SLEEPER MANAGERS…' : 'SLEEPER IMPORT BLOCKED HERE · SHOWING DEMO NAMES'}</p></div><div className="deadline"><span>THURSDAY CARD LOCK</span><strong>{revealed ? 'CARDS REVEALED' : '02 : 14 : 36'}</strong><button onClick={toggleReveal}>{revealed ? 'RESET TO PRE-WEEK' : 'COMMISSIONER: LOCK & REVEAL'}</button></div></section>

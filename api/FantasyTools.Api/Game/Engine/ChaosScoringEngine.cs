@@ -182,10 +182,10 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
             // boost effect for the card owner's defense, both carrying the same QB id.
             var qbId = effect.ReferencedPlayerId ?? slot?.PlayerId;
             if (qbId is null || !input.PlayerStats.TryGetValue(qbId, out var quarterbackStats)) return false;
-            change = effect.Category == CardCategory.Attack ? -quarterbackStats.TouchdownPoints : quarterbackStats.TouchdownPoints;
+            change = effect.Category == CardCategory.Attack ? -quarterbackStats.PassingTouchdownPoints : quarterbackStats.PassingTouchdownPoints;
             description = effect.Category == CardCategory.Attack
-                ? $"removed {quarterbackStats.TouchdownPoints:0.##} quarterback touchdown points"
-                : $"awarded {quarterbackStats.TouchdownPoints:0.##} intercepted touchdown points to the defense";
+                ? $"removed {quarterbackStats.PassingTouchdownPoints:0.##} passing-touchdown points"
+                : $"awarded {quarterbackStats.PassingTouchdownPoints:0.##} passing-touchdown points to the starting defense";
             return true;
         }
         if (slot is null || stats is null) return false;
@@ -200,8 +200,8 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
                     : $"{slot.PlayerName} had {stats.Receptions} catches, reducing {current:0.##} to zero";
                 return true;
             case "complete":
-                change = stats.Completions * 2m;
-                description = $"added 2 points for each of {stats.Completions} completions";
+                change = stats.Completions * 2m - stats.CompletionPoints;
+                description = $"replaced normal completion scoring with 2 points for each of {stats.Completions} completions";
                 return true;
             case "incomplete":
                 var incompletions = Math.Max(0, stats.PassingAttempts - stats.Completions);
@@ -221,12 +221,12 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
                 description = $"started {slot.PlayerName} at minus 15 points";
                 return true;
             case "stickyhands":
-                change = stats.Receptions * 2m;
-                description = $"added 2 points for each of {stats.Receptions} receptions";
+                change = stats.Receptions * 2m - stats.ReceptionPoints;
+                description = $"replaced normal reception scoring with 2 points for each of {stats.Receptions} receptions";
                 return true;
             case "beastmode":
-                change = stats.RushingYards * 0.3m;
-                description = $"added 0.3 points for each of {stats.RushingYards:0.##} rushing yards";
+                change = stats.RushingYards * 0.3m - stats.RushingYardPoints;
+                description = $"replaced normal rushing-yard scoring with 0.3 points for each of {stats.RushingYards:0.##} yards";
                 return true;
             case "fafb":
                 change = stats.RushingYardPoints;

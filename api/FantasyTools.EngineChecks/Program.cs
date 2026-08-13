@@ -84,19 +84,20 @@ var capHit = engine.Calculate(new(teamId, starters, new Dictionary<string, decim
 AssertEqual(40m, capHit.ChaosScore, "cap hit limits every starter");
 
 var rules = new CardPlayRules();
-var request = new PlayRequest(weekId, matchupId, teamId, opponentId, cardCopyId, CardTiming.PreWeek, qbTarget, DateTimeOffset.UtcNow);
-var validState = new WeekPlayState(WeekStatus.SelectionOpen, DateTimeOffset.UtcNow.AddHours(1), 0, 0, true, CardCopyState.Hand, true, true);
+var request = new PlayRequest(weekId, matchupId, teamId, opponentId, cardCopyId, CardCategory.Boost, CardTiming.PreWeek, qbTarget, DateTimeOffset.UtcNow);
+var validState = new WeekPlayState(WeekStatus.SelectionOpen, DateTimeOffset.UtcNow.AddHours(1), 0, [], true, CardCopyState.Hand, true, true);
 AssertTrue(rules.Validate(request, validState).Allowed, "valid pre-week play");
-AssertEqual("preweek_limit", rules.Validate(request, validState with { ExistingPreWeekSelections = 2 }).Code, "two-card pre-week limit");
-AssertEqual("live_limit", rules.Validate(request with { Timing = CardTiming.Live }, validState with { Status = WeekStatus.Live, ExistingLivePlays = 1 }).Code, "one-card live limit");
+AssertEqual("weekly_limit", rules.Validate(request, validState with { ExistingPreWeekSelections = 4 }).Code, "four-card weekly limit");
+AssertEqual("category_limit", rules.Validate(request, validState with { SelectedCategories = [CardCategory.Boost] }).Code, "one boost limit");
+AssertTrue(CardPlayRules.ValidateCompleteSelection([CardCategory.Boost, CardCategory.Attack, CardCategory.Unique, CardCategory.Defense]).Allowed, "weekly category mix");
 AssertEqual("card_not_in_hand", rules.Validate(request, validState with { CardState = CardCopyState.Played }).Code, "card ownership/state enforcement");
 
 var lifecycle = new CardLifecycleRules();
 AssertTrue(lifecycle.ValidateTransition(CardCopyState.SecretSelection, CardCopyState.Hand).Allowed, "unlocked selection returns to hand");
 AssertEqual("invalid_card_transition", lifecycle.ValidateTransition(CardCopyState.Locked, CardCopyState.Hand).Code, "locked card cannot return to hand");
-var draws = lifecycle.CalculateReplacementDraws(3, [CardCategory.Attack, CardCategory.Defense]);
+var draws = lifecycle.CalculateReplacementDraws(6, [CardCategory.Attack, CardCategory.Unique]);
 AssertEqual(1, draws.Single(draw => draw.Category == CardCategory.Attack).Quantity, "attack replacement draw");
-AssertEqual(1, draws.Single(draw => draw.Category == CardCategory.Defense).Quantity, "defense replacement draw");
+AssertEqual(1, draws.Single(draw => draw.Category == CardCategory.Unique).Quantity, "unique replacement draw");
 
 var authorization = new CommissionerAuthorization();
 var primary = new LeagueAccess(teamId, "primary", true, new HashSet<CommissionerPermission>());

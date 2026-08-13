@@ -8,7 +8,7 @@ public interface ICardLifecycleRules
 {
     RuleDecision ValidateTransition(CardCopyState from, CardCopyState to);
     RuleDecision CanReturnSelection(WeekStatus weekStatus, DateTimeOffset now, DateTimeOffset deadline);
-    IReadOnlyList<ReplacementDraw> CalculateReplacementDraws(int cardsStillInHand, IReadOnlyList<CardCategory> categoriesPlayed, int maxHandSize = 5);
+    IReadOnlyList<ReplacementDraw> CalculateReplacementDraws(int cardsStillInHand, IReadOnlyList<CardCategory> categoriesPlayed, int maxHandSize = 8);
 }
 
 public sealed class CardLifecycleRules : ICardLifecycleRules
@@ -17,7 +17,7 @@ public sealed class CardLifecycleRules : ICardLifecycleRules
         new Dictionary<CardCopyState, CardCopyState[]>
         {
             [CardCopyState.Deck] = [CardCopyState.Hand],
-            [CardCopyState.Hand] = [CardCopyState.SecretSelection, CardCopyState.Played],
+            [CardCopyState.Hand] = [CardCopyState.SecretSelection],
             [CardCopyState.SecretSelection] = [CardCopyState.Hand, CardCopyState.Locked],
             [CardCopyState.Locked] = [CardCopyState.Revealed],
             [CardCopyState.Revealed] = [CardCopyState.Played],
@@ -36,7 +36,7 @@ public sealed class CardLifecycleRules : ICardLifecycleRules
             : RuleDecision.Reject("selection_locked", "Only an unlocked pre-week selection can return to the hand.");
 
     public IReadOnlyList<ReplacementDraw> CalculateReplacementDraws(int cardsStillInHand,
-        IReadOnlyList<CardCategory> categoriesPlayed, int maxHandSize = 5)
+        IReadOnlyList<CardCategory> categoriesPlayed, int maxHandSize = 8)
     {
         if (cardsStillInHand < 0 || cardsStillInHand > maxHandSize)
             throw new ArgumentOutOfRangeException(nameof(cardsStillInHand));

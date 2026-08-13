@@ -10,4 +10,6 @@ public interface ICardWorkspaceService
     Task<CardDraftDocument> Update(string leagueId, string cardId, string userId, string userName, SaveCardDraftRequest request);
     Task<CardDraftDocument> ChangeStatus(string leagueId, string cardId, string userId, string userName, string status);
     Task SetCollaborator(string leagueId, string actorUserId, ChangeCardCollaboratorRequest request);
+    Task<WeeklyCardDocument> SaveWeeklyCard(string leagueId, string userId, string userName, SaveWeeklyCardRequest request);
+    Task DeleteWeeklyCard(string leagueId, int week, string userId);
 }

@@ -1,11 +1,11 @@
 type Idea = { name:string; category:string; target:string; effectType:string; amount:number; copies:number; officialDescription:string; commissionerNotes:string; isSpecial?:boolean }
 
 const basic = (category:string,name:string,amount:number,target:string,copies:number):Idea => ({
-  name,category,target,copies,amount,isSpecial:false,effectType:category==='ATTACK'?'Percentage reduction':category==='DEFENSE'?'Attack protection':'Percentage boost',
+  name,category:category==='DEFENSE'?'UNIQUE':category,target,copies,amount,isSpecial:category==='DEFENSE',effectType:category==='ATTACK'?'Percentage reduction':category==='DEFENSE'?'Attack protection':'Percentage boost',
   officialDescription:category==='ATTACK'?`Reduce your opponent's starting ${target} points by ${amount}%.`:category==='DEFENSE'?`Reduce an incoming attack against your ${target} by ${amount}%.`:`Increase your starting ${target} points by ${amount}%.`,
   commissionerNotes:'Imported from the Card Data sheet. Effect follows the indicated lineup position.'
 })
-const special = (name:string,target:string,amount:number,copies:number,officialDescription:string,notes=''):Idea => ({name,category:'BOOST',target,amount,copies,isSpecial:true,effectType:'Specialty rule',officialDescription,commissionerNotes:`Imported from the Card Data sheet. ${notes}`.trim()})
+const special = (name:string,target:string,amount:number,copies:number,officialDescription:string,notes=''):Idea => ({name,category:'UNIQUE',target,amount,copies,isSpecial:true,effectType:'Specialty rule',officialDescription,commissionerNotes:`Imported from the Card Data sheet. ${notes}`.trim()})
 
 export const cardDataIdeas: Idea[] = [
   basic('ATTACK','Two Deep',25,'QB',3),basic('ATTACK','No Fly Zone',50,'QB',2),basic('ATTACK','Air Traffic Control',100,'QB',1),

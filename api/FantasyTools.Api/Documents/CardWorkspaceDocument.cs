@@ -8,7 +8,24 @@ public class CardWorkspaceDocument : BaseDocument
     public string PrimaryCommissionerUserId { get; set; }
     public List<CardCollaboratorDocument> Collaborators { get; set; } = [];
     public List<CardDraftDocument> Cards { get; set; } = [];
+    public List<WeeklyCardDocument> WeeklyCards { get; set; } = [];
     public List<CardAuditDocument> Audit { get; set; } = [];
+}
+
+public class WeeklyCardDocument
+{
+    public string Id { get; set; }
+    public int Week { get; set; }
+    public string Name { get; set; }
+    public string ArtworkUrl { get; set; }
+    public string Description { get; set; }
+    public string RuleType { get; set; }
+    public decimal Amount { get; set; }
+    public string Target { get; set; }
+    public bool Active { get; set; }
+    public string UpdatedByUserId { get; set; }
+    public string UpdatedByName { get; set; }
+    public DateTime UpdatedAt { get; set; }
 }
 
 public class CardCollaboratorDocument

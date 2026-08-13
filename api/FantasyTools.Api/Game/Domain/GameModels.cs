@@ -1,7 +1,7 @@
 namespace FantasyTools.Api.Game.Domain;
 
-public enum CardCategory { Attack, Boost, Defense }
-public enum CardTiming { PreWeek, Live }
+public enum CardCategory { Attack, Boost, Unique, Defense } // Defense remains for legacy saved cards; it is treated as Unique.
+public enum CardTiming { PreWeek }
 public enum TargetType { StartingSlot, PositionGroup, Team, SpecificPlayer, Dynamic }
 public enum EffectType
 {
@@ -72,6 +72,9 @@ public sealed record PlayerWeekStats(
     decimal RushingYards = 0m,
     decimal PassingYards = 0m,
     decimal RushingYardPoints = 0m,
+    decimal ReceptionPoints = 0m,
+    decimal CompletionPoints = 0m,
+    decimal PassingTouchdownPoints = 0m,
     bool LeftGameInjuredAndDidNotReturn = false);
 
 public sealed record ActiveEffect(
@@ -116,6 +119,7 @@ public sealed record PlayRequest(
     Guid ActingTeamId,
     Guid OpponentTeamId,
     Guid CardCopyId,
+    CardCategory Category,
     CardTiming Timing,
     CardTarget Target,
     DateTimeOffset RequestedAt);
@@ -124,7 +128,7 @@ public sealed record WeekPlayState(
     WeekStatus Status,
     DateTimeOffset Deadline,
     int ExistingPreWeekSelections,
-    int ExistingLivePlays,
+    IReadOnlyList<CardCategory> SelectedCategories,
     bool CardIsOwnedByActingTeam,
     CardCopyState CardState,
     bool ActingTeamIsInMatchup,
