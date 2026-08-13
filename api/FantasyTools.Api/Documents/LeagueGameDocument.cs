@@ -10,7 +10,15 @@ public class LeagueGameDocument : BaseDocument
     public string SleeperStatus { get; set; } = "pre_draft";
     public List<SleeperTeamSnapshot> Teams { get; set; } = [];
     public List<SleeperMatchupSnapshot> Matchups { get; set; } = [];
+    public List<SeasonHandDocument> Hands { get; set; } = [];
     public List<WeeklyGameDocument> Weeks { get; set; } = [];
+}
+
+public class SeasonHandDocument
+{
+    public int RosterId { get; set; }
+    public int LastDrawnWeek { get; set; }
+    public List<DealtCardDocument> Cards { get; set; } = [];
 }
 
 public class SleeperTeamSnapshot
@@ -56,6 +64,7 @@ public class WeeklyGameDocument
 public class TeamWeekDocument
 {
     public int RosterId { get; set; }
+    public DateTime? DrawnAtUtc { get; set; }
     public List<DealtCardDocument> Hand { get; set; } = [];
     public List<CardSelectionDocument> Selections { get; set; } = [];
 }

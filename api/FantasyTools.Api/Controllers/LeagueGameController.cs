@@ -12,6 +12,7 @@ public class LeagueGameController(ILeagueGameService service):ControllerBase
     [HttpPost("sync/{week:int}")] public Task<ActionResult> Sync(string leagueId,int week)=>Run(()=>service.Sync(leagueId,UserId,week));
     [HttpGet("weeks/{week:int}")] public Task<ActionResult> Week(string leagueId,int week)=>Run(()=>service.GetWeek(leagueId,UserId,week));
     [HttpPost("weeks/{week:int}/deal")] public Task<ActionResult> Deal(string leagueId,int week)=>Run(()=>service.Deal(leagueId,UserId,week));
+    [HttpPost("weeks/{week:int}/draw")] public Task<ActionResult> Draw(string leagueId,int week)=>Run(()=>service.Draw(leagueId,UserId,week));
     [HttpPut("weeks/{week:int}/deadline")] public Task<ActionResult> Deadline(string leagueId,int week,[FromBody]SetWeekDeadlineRequest request)=>Run(()=>service.SetDeadline(leagueId,UserId,week,request.DeadlineUtc));
     [HttpPost("weeks/{week:int}/selections")] public Task<ActionResult> Select(string leagueId,int week,[FromBody]SaveSelectionRequest request)=>Run(()=>service.Select(leagueId,UserId,week,request));
     [HttpDelete("weeks/{week:int}/selections/{copyId}")] public Task<ActionResult> Return(string leagueId,int week,string copyId)=>Run(()=>service.Return(leagueId,UserId,week,copyId));
