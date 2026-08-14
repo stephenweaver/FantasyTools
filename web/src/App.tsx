@@ -305,6 +305,7 @@ function LeagueGame({ league }: { league: ChaosLeague }) {
       const ordered=[...week.teams].sort((a,b)=>{const ma=week.matchups.find(item=>item.rosterId===a.rosterId)?.matchupId??999;const mb=week.matchups.find(item=>item.rosterId===b.rosterId)?.matchupId??999;return ma-mb||a.rosterId-b.rosterId})
       const palette=['#9cff57','#ff4e79','#ffd452','#54d6ff','#b783ff','#ff9f43','#56e3c2','#fb7185','#a78bfa','#38bdf8']
       const imported=ordered.map((team,index)=>{const matchup=week.matchups.find(item=>item.rosterId===team.rosterId);const calculated=week.chaosScores?.find(item=>item.rosterId===team.rosterId);return {id:team.rosterId,sleeperUserId:team.ownerId,manager:team.managerName||`Roster ${team.rosterId}`,name:team.teamName||`${team.managerName}'s Team`,initials:(team.teamName||team.managerName||'TM').split(/\s+/).map(word=>word[0]).join('').slice(0,2).toUpperCase(),record:`${team.wins}–${team.losses}`,score:matchup?.points||0,chaos:calculated?.chaosScore??matchup?.points??0,hand:team.rosterId===week.team?.rosterId?week.hand.length:0,accent:palette[index%palette.length]}}
+      )
       setTeamData(imported)
     }
     setSleeperStatus('live')
