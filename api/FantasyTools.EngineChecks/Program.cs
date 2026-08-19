@@ -83,6 +83,19 @@ var capHit = engine.Calculate(new(teamId, starters, new Dictionary<string, decim
 }));
 AssertEqual(40m, capHit.ChaosScore, "cap hit limits every starter");
 
+var updatedRules = engine.Calculate(new TeamScoreInput(teamId, starters, new Dictionary<string, decimal>(), new ActiveEffect[]
+{
+    new(Guid.NewGuid(), "Rough Start", CardCategory.Unique, EffectType.Custom, receiverTarget, -20m, CustomHandler: "rough-start"),
+    new(Guid.NewGuid(), "Butt Fumble", CardCategory.Unique, EffectType.Custom, new(TargetType.Team,teamId,null,null,null,null), 10m, CustomHandler: "butt-fumble")
+}) { PlayerStats = new Dictionary<string, PlayerWeekStats> { ["qb-1"] = new(Fumbles: 1), ["wr-1"] = new() } });
+AssertEqual(50m, updatedRules.ChaosScore, "sheet values use minus twenty and ten per fumble");
+
+var immaculate = engine.Calculate(new TeamScoreInput(teamId, starters, new Dictionary<string, decimal>(), new[]
+{
+    new ActiveEffect(Guid.NewGuid(), "Immaculate Reception", CardCategory.Unique, EffectType.Custom, receiverTarget, 15m, CustomHandler: "immaculate-reception")
+}) { PlayerStats = new Dictionary<string, PlayerWeekStats> { ["wr-1"] = new(Receptions: 4, Targets: 4) } });
+AssertEqual(75m, immaculate.ChaosScore, "immaculate reception perfect target bonus");
+
 var rules = new CardPlayRules();
 var request = new PlayRequest(weekId, matchupId, teamId, opponentId, cardCopyId, CardCategory.Boost, CardTiming.PreWeek, qbTarget, DateTimeOffset.UtcNow);
 var validState = new WeekPlayState(WeekStatus.SelectionOpen, DateTimeOffset.UtcNow.AddHours(1), 0, [], true, CardCopyState.Hand, true, true);

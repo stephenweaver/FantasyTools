@@ -16,6 +16,7 @@ public class LeagueGameController(ILeagueGameService service):ControllerBase
     [HttpPut("weeks/{week:int}/deadline")] public Task<ActionResult> Deadline(string leagueId,int week,[FromBody]SetWeekDeadlineRequest request)=>Run(()=>service.SetDeadline(leagueId,UserId,week,request.DeadlineUtc));
     [HttpPost("weeks/{week:int}/selections")] public Task<ActionResult> Select(string leagueId,int week,[FromBody]SaveSelectionRequest request)=>Run(()=>service.Select(leagueId,UserId,week,request));
     [HttpDelete("weeks/{week:int}/selections/{copyId}")] public Task<ActionResult> Return(string leagueId,int week,string copyId)=>Run(()=>service.Return(leagueId,UserId,week,copyId));
+    [HttpDelete("weeks/{week:int}/hand/{copyId}")] public Task<ActionResult> Discard(string leagueId,int week,string copyId)=>Run(()=>service.Discard(leagueId,UserId,week,copyId));
     [HttpPost("weeks/{week:int}/reveal")] public Task<ActionResult> Reveal(string leagueId,int week)=>Run(()=>service.Reveal(leagueId,UserId,week));
     private string UserId=>User.FindFirstValue(ClaimTypes.NameIdentifier);
     private async Task<ActionResult> Run<T>(Func<Task<T>> action){try{return Ok(await action());}catch(ArgumentException e){return BadRequest(e.Message);}catch(KeyNotFoundException e){return NotFound(e.Message);}catch(UnauthorizedAccessException e){return Forbid();}catch(InvalidOperationException e){return Conflict(e.Message);}catch(HttpRequestException e){return StatusCode(502,$"Sleeper is temporarily unavailable: {e.Message}");}}

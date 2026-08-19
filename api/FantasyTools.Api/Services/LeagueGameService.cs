@@ -59,8 +59,9 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
         if(state==null) return new { week, status="setup", sleeperStatus=game.SleeperStatus, team=game.Teams.FirstOrDefault(x=>x.RosterId==roster), hand=Array.Empty<object>(), selections=Array.Empty<object>(), canDraw=false, cardsNeeded=0, teams=game.Teams, matchups=game.Matchups.Where(x=>x.Week==week), chaosScores=Array.Empty<object>() };
         if(state.Status=="selection_open"&&DateTime.UtcNow>=state.DeadlineUtc)
         {
-            var deck=Deck(await Workspace(leagueId)); EnsureDeck(deck);
-            foreach(var teamState in state.Teams){PrepareDraw(game,state,teamState,deck);AutoFill(teamState);}
+            var deadlineWorkspace=await Workspace(leagueId);var deck=Deck(deadlineWorkspace); EnsureDeck(deck);
+            var chaosWeek=IsChaosWeek(deadlineWorkspace,week);
+            foreach(var teamState in state.Teams){PrepareDraw(game,state,teamState,deck);if(!chaosWeek)AutoFill(teamState);}
             state.Status="revealed";state.RevealedAtUtc=DateTime.UtcNow;game.At=DateTime.UtcNow;await files.Upsert(game);
         }
         var own=state.Teams.FirstOrDefault(x=>x.RosterId==roster);
@@ -77,7 +78,7 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
         if(game.Weeks.Any(x=>x.Week==week))return (object)new{opened=true,week,alreadyOpen=true};
         var workspace=await Workspace(leagueId); EnsureDeck(Deck(workspace));
         foreach(var hand in game.Hands)DiscardPreviouslyPlayed(game,hand,week);
-        var state=new WeeklyGameDocument{Week=week,DeadlineUtc=NextThursday(),Status="selection_open",Teams=game.Teams.Select(team=>new TeamWeekDocument{RosterId=team.RosterId}).ToList()};
+        var state=new WeeklyGameDocument{Week=week,DeadlineUtc=NextWednesdayAtEightEastern(),Status="selection_open",Teams=game.Teams.Select(team=>new TeamWeekDocument{RosterId=team.RosterId}).ToList()};
         game.Weeks.Add(state); return (object)new {opened=true,week,teams=state.Teams.Count,state.DeadlineUtc};
     });
 
@@ -97,16 +98,27 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
         if(team.DrawnAtUtc is null)throw new InvalidOperationException("Draw your cards for this week before making selections.");
         var card=team.Hand.SingleOrDefault(x=>x.CopyId==request.CopyId)??throw new KeyNotFoundException("That card is not in your hand.");
         if(team.Selections.Any(x=>x.CopyId==card.CopyId)) return (object)new {selected=true};
-        var category=Normalize(card.Category); var limit=category=="UNIQUE"?2:1;
-        if(team.Selections.Count>=4||team.Selections.Count(x=>Normalize(x.Category)==category)>=limit) throw new InvalidOperationException($"Your {category} selection slots are full.");
+        var category=Normalize(card.Category);var workspace=await Workspace(leagueId);var chaosWeek=IsChaosWeek(workspace,week);var limit=category=="UNIQUE"?2:1;
+        if(!chaosWeek&&(team.Selections.Count>=4||team.Selections.Count(x=>Normalize(x.Category)==category)>=limit)) throw new InvalidOperationException($"Your {category} selection slots are full.");
+        if(chaosWeek&&team.Selections.Count>=team.Hand.Count)throw new InvalidOperationException("Every card in your Chaos Week hand is already selected.");
         ValidateTarget(game,week,roster,card,request);
         team.Selections.Add(new CardSelectionDocument{CopyId=card.CopyId,CardId=card.CardId,Category=category,TargetRosterId=request.TargetRosterId,TargetPlayerId=request.TargetPlayerId,TargetSlot=request.TargetSlot,SelectedAtUtc=DateTime.UtcNow});
         return (object)new {selected=true,selections=team.Selections};
     });
 
     public async Task<object> Return(string leagueId,string userId,int week,string copyId)=>await Mutate(leagueId,async game=>{var roster=await UserRoster(leagueId,userId);var state=Week(game,week);EnsureOpen(state);state.Teams.Single(x=>x.RosterId==roster).Selections.RemoveAll(x=>x.CopyId==copyId);return (object)new{returned=true};});
+    public async Task<object> Discard(string leagueId,string userId,int week,string copyId)=>await Mutate(leagueId,async game=>
+    {
+        var roster=await UserRoster(leagueId,userId);var state=Week(game,week);EnsureOpen(state);var team=state.Teams.Single(x=>x.RosterId==roster);
+        if(team.DrawnAtUtc is null)throw new InvalidOperationException("Draw this week's cards before discarding.");
+        if(!string.IsNullOrWhiteSpace(team.DiscardedCopyId))throw new InvalidOperationException("You already discarded one card this week.");
+        if(team.Selections.Any(x=>x.CopyId==copyId))throw new InvalidOperationException("Return this card from your selections before discarding it.");
+        if(team.Hand.All(x=>x.CopyId!=copyId))throw new KeyNotFoundException("That card is not in your hand.");
+        team.Hand.RemoveAll(x=>x.CopyId==copyId);var seasonHand=SeasonHand(game,roster);seasonHand.Cards.RemoveAll(x=>x.CopyId==copyId);
+        team.DiscardedCopyId=copyId;team.DiscardedAtUtc=DateTime.UtcNow;return (object)new{discarded=true,cardsInHand=team.Hand.Count};
+    });
     public async Task<object> SetDeadline(string leagueId,string actorUserId,int week,DateTime deadlineUtc)=>await Mutate(leagueId,async game=>{await Commissioner(leagueId,actorUserId);var state=Week(game,week);state.DeadlineUtc=deadlineUtc.ToUniversalTime();return (object)new{state.Week,state.DeadlineUtc};});
-    public async Task<object> Reveal(string leagueId,string actorUserId,int week)=>await Mutate(leagueId,async game=>{await Commissioner(leagueId,actorUserId);var state=Week(game,week);if(state.Teams.Any(x=>!Complete(x.Selections)))throw new InvalidOperationException("Every team must have 1 Boost, 1 Attack, and 2 Unique cards selected.");state.Status="revealed";state.RevealedAtUtc=DateTime.UtcNow;return (object)new{revealed=true,state.RevealedAtUtc};});
+    public async Task<object> Reveal(string leagueId,string actorUserId,int week)=>await Mutate(leagueId,async game=>{await Commissioner(leagueId,actorUserId);var state=Week(game,week);var chaosWeek=IsChaosWeek(await Workspace(leagueId),week);if(!chaosWeek&&state.Teams.Any(x=>!Complete(x.Selections)))throw new InvalidOperationException("Every team must have 1 Boost, 1 Attack, and 2 Unique cards selected.");state.Status="revealed";state.RevealedAtUtc=DateTime.UtcNow;return (object)new{revealed=true,state.RevealedAtUtc};});
 
     private object[] CalculateScores(LeagueGameDocument game,WeeklyGameDocument state,CardWorkspaceDocument workspace,int week)
     {
@@ -140,7 +152,8 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
         var category=Enum.TryParse<CardCategory>(Normalize(card.Category),true,out var parsed)?parsed:CardCategory.Unique;
         var type=ParseEffect(card.EffectType);
         var amount=category==CardCategory.Attack&&type is EffectType.Percentage or EffectType.FlatPoints?-Math.Abs(card.Amount):card.Amount;
-        var target=new CardTarget(TargetType.Dynamic,TeamGuid(rosterId),selection.TargetSlot,null,selection.TargetPlayerId,null);
+        var targetType=!string.IsNullOrWhiteSpace(selection.TargetPlayerId)?TargetType.SpecificPlayer:!string.IsNullOrWhiteSpace(selection.TargetSlot)&&selection.TargetSlot!="AUTO"?TargetType.StartingSlot:TargetType.Team;
+        var target=new CardTarget(targetType,TeamGuid(rosterId),selection.TargetSlot,null,selection.TargetPlayerId,null);
         return new ActiveEffect(Guid.TryParse(selection.CopyId,out var id)?id:Guid.NewGuid(),card.Name,category,type,target,amount,card.SourcePlayerId,card.DestinationSlot,card.Multiplier,card.Name);
     }
 
@@ -194,7 +207,7 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
     private static void EnsureDeck(List<CardDraftDocument> deck)
     {
         if(deck.Count<8)throw new InvalidOperationException("The active deck needs at least eight card copies with artwork.");
-        foreach(var required in new[]{("BOOST",1),("ATTACK",1),("UNIQUE",2)})if(deck.Count(x=>Normalize(x.Category)==required.Item1)<required.Item2)throw new InvalidOperationException($"The active deck needs at least {required.Item2} {required.Item1} card(s).");
+        foreach(var required in new[]{("BOOST",2),("ATTACK",2),("UNIQUE",4)})if(deck.Count(x=>Normalize(x.Category)==required.Item1)<required.Item2)throw new InvalidOperationException($"The active deck needs at least {required.Item2} {required.Item1} card(s).");
     }
     private static SeasonHandDocument SeasonHand(LeagueGameDocument game,int roster)
     {
@@ -211,7 +224,12 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
     {
         var random=new Random(HashCode.Combine(leagueId,week,roster));
         var candidates=deck.OrderBy(_=>random.Next()).ToList();
-        foreach(var required in new[]{("BOOST",1),("ATTACK",1),("UNIQUE",2)})
+        if(week==1&&!hand.Cards.Any(x=>x.Name.Equals("Challenge Flag",StringComparison.OrdinalIgnoreCase)))
+        {
+            var challenge=candidates.FirstOrDefault(x=>x.Name.Equals("Challenge Flag",StringComparison.OrdinalIgnoreCase))??throw new InvalidOperationException("The active deck needs a Challenge Flag so every team can start with one.");
+            AddCard(hand,challenge);candidates.Remove(challenge);
+        }
+        foreach(var required in new[]{("BOOST",2),("ATTACK",2),("UNIQUE",4)})
         {
             var missing=Math.Max(0,required.Item2-hand.Cards.Count(x=>Normalize(x.Category)==required.Item1));
             foreach(var card in candidates.Where(x=>Normalize(x.Category)==required.Item1).Take(missing).ToList()){AddCard(hand,card);candidates.Remove(card);}
@@ -228,7 +246,13 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
     }
     private static string Normalize(string value)=>value?.ToUpperInvariant()=="DEFENSE"?"UNIQUE":value?.ToUpperInvariant()??"UNIQUE";
     private static void AddCategory(List<CardDraftDocument> chosen,List<CardDraftDocument> deck,string category,int count){foreach(var card in deck.Where(x=>Normalize(x.Category)==category).Take(count))chosen.Add(card);if(chosen.Count(x=>Normalize(x.Category)==category)<count)throw new InvalidOperationException($"The active deck needs at least {count} {category} card(s).");}
-    private static DateTime NextThursday(){var now=DateTime.UtcNow;var days=((int)DayOfWeek.Thursday-(int)now.DayOfWeek+7)%7;return now.Date.AddDays(days==0?7:days).AddHours(17);}
+    private static bool IsChaosWeek(CardWorkspaceDocument workspace,int week)=>workspace.WeeklyCards.Any(x=>x.Week==week&&x.Active&&x.Name.Equals("Chaos",StringComparison.OrdinalIgnoreCase));
+    private static DateTime NextWednesdayAtEightEastern()
+    {
+        var zone=TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");var now=TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,zone);
+        var days=((int)DayOfWeek.Wednesday-(int)now.DayOfWeek+7)%7;var local=now.Date.AddDays(days).AddHours(20);
+        if(local<=now)local=local.AddDays(7);return TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local,DateTimeKind.Unspecified),zone);
+    }
     private static string Text(JsonElement x,string name)=>x.ValueKind==JsonValueKind.Object&&x.TryGetProperty(name,out var v)&&v.ValueKind!=JsonValueKind.Null?v.GetString()??"":"";
     private static int Number(JsonElement x,string name)=>x.TryGetProperty(name,out var v)&&v.TryGetInt32(out var n)?n:0;
     private static decimal Decimal(JsonElement x,string name)=>x.TryGetProperty(name,out var v)&&v.TryGetDecimal(out var n)?n:0;

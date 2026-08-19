@@ -64,18 +64,29 @@ public sealed record SlotScore(string Slot, string PlayerId, string PlayerName, 
 // instead of trying to infer football statistics from a fantasy-point total.
 public sealed record PlayerWeekStats(
     int Receptions = 0,
+    int Targets = 0,
     int Completions = 0,
     int PassingAttempts = 0,
     int SacksTaken = 0,
     int Fumbles = 0,
+    int PassingInterceptions = 0,
+    int DefensiveSacks = 0,
+    int DefensiveInterceptions = 0,
+    int DefensiveFumbleRecoveries = 0,
     decimal TouchdownPoints = 0m,
     decimal RushingYards = 0m,
     decimal PassingYards = 0m,
+    decimal ReceivingYards = 0m,
     decimal RushingYardPoints = 0m,
+    decimal PassingYardPoints = 0m,
+    decimal ReceivingYardPoints = 0m,
     decimal ReceptionPoints = 0m,
     decimal CompletionPoints = 0m,
     decimal PassingTouchdownPoints = 0m,
-    bool LeftGameInjuredAndDidNotReturn = false);
+    decimal DefensiveSackPoints = 0m,
+    decimal DefensiveInterceptionPoints = 0m,
+    bool LeftGameInjuredAndDidNotReturn = false,
+    string InjuryStatus = "");
 
 public sealed record ActiveEffect(
     Guid CardPlayId,

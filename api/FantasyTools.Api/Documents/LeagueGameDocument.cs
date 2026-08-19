@@ -65,6 +65,8 @@ public class TeamWeekDocument
 {
     public int RosterId { get; set; }
     public DateTime? DrawnAtUtc { get; set; }
+    public string DiscardedCopyId { get; set; }
+    public DateTime? DiscardedAtUtc { get; set; }
     public List<DealtCardDocument> Hand { get; set; } = [];
     public List<CardSelectionDocument> Selections { get; set; } = [];
 }

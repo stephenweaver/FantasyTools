@@ -133,23 +133,33 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
         if (handler == "buttfumble")
         {
             var fumbles = input.Starters.Sum(s => input.PlayerStats.GetValueOrDefault(s.PlayerId)?.Fumbles ?? 0);
-            change = fumbles * 5m;
-            description = $"added 5 points for each of the team's {fumbles} fumbles";
+            change = fumbles * 10m;
+            description = $"added 10 points for each of the starting lineup's {fumbles} fumbles";
             return true;
         }
-        if (handler == "injured")
+        if (handler is "injured" or "medicaltent")
         {
-            var injured = input.Starters.Any(s => input.PlayerStats.GetValueOrDefault(s.PlayerId)?.LeftGameInjuredAndDidNotReturn == true);
+            var injured = input.Starters.Any(s =>
+            {
+                var playerStats=input.PlayerStats.GetValueOrDefault(s.PlayerId);
+                return s.RawPoints < 5m && playerStats is not null &&
+                    (playerStats.InjuryStatus.Equals("Out",StringComparison.OrdinalIgnoreCase) || playerStats.InjuryStatus.Equals("IR",StringComparison.OrdinalIgnoreCase));
+            });
             change = injured ? 50m : 0m;
-            description = injured ? "added 50 points because a starter left injured and did not return" : "no qualifying starter injury occurred";
+            description = injured ? "added 50 points because a sub-five-point starter was listed Out or IR" : "no starter met the Medical Tent condition";
             return true;
+        }
+        if (handler == "2025derrickhenry")
+        {
+            var fumbles=input.Starters.Sum(s=>input.PlayerStats.GetValueOrDefault(s.PlayerId)?.Fumbles??0);
+            change=fumbles * -10m; description=$"subtracted 10 points for each of the starting lineup's {fumbles} fumbles"; return true;
         }
         if (handler == "283")
         {
             if (input.ScoreEnteringMonday is null || input.OpponentScoreEnteringMonday is null) return false;
             var deficit = input.OpponentScoreEnteringMonday.Value - input.ScoreEnteringMonday.Value;
-            change = deficit >= 50m ? 40m : 0m;
-            description = deficit >= 50m ? $"added 40 points after entering Monday down {deficit:0.##}" : $"no bonus because the Monday deficit was {Math.Max(0, deficit):0.##}";
+            change = deficit >= 50m ? 51m : 0m;
+            description = deficit >= 50m ? $"added 51 points after entering Monday down {deficit:0.##}" : $"no bonus because the Monday deficit was {Math.Max(0, deficit):0.##}";
             return true;
         }
         if (handler == "mvp")
@@ -200,8 +210,8 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
                     : $"{slot.PlayerName} had {stats.Receptions} catches, reducing {current:0.##} to zero";
                 return true;
             case "complete":
-                change = stats.Completions * 2m - stats.CompletionPoints;
-                description = $"replaced normal completion scoring with 2 points for each of {stats.Completions} completions";
+                change = stats.Completions * 2m;
+                description = $"added 2 extra points for each of {stats.Completions} completions";
                 return true;
             case "incomplete":
                 var incompletions = Math.Max(0, stats.PassingAttempts - stats.Completions);
@@ -217,8 +227,8 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
                 description = $"doubled {stats.TouchdownPoints:0.##} touchdown points for {slot.PlayerName}";
                 return true;
             case "roughstart":
-                change = -15m;
-                description = $"started {slot.PlayerName} at minus 15 points";
+                change = -20m;
+                description = $"started {slot.PlayerName} at minus 20 points";
                 return true;
             case "stickyhands":
                 change = stats.Receptions * 2m - stats.ReceptionPoints;
@@ -235,6 +245,23 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
             case "shoestringtackle":
                 change = current * 0.5m;
                 description = $"increased {slot.PlayerName}'s defense score by 50%";
+                return true;
+            case "aaaaaandnobodysblocking":
+                change = stats.SacksTaken * 5m;
+                description = $"added 5 points for each of {stats.SacksTaken} sacks taken";
+                return true;
+            case "bigsack":
+                change = stats.DefensiveSacks * 5m - stats.DefensiveSackPoints;
+                description = $"made each of {stats.DefensiveSacks} defensive sacks worth 5 total points";
+                return true;
+            case "interception":
+                change = stats.DefensiveInterceptions * 15m - stats.DefensiveInterceptionPoints;
+                description = $"made each of {stats.DefensiveInterceptions} defensive interceptions worth 15 total points";
+                return true;
+            case "immaculatereception":
+                var perfect = stats.Targets >= 3 && stats.Receptions == stats.Targets;
+                change = perfect ? 15m : 0m;
+                description = perfect ? $"caught all {stats.Targets} targets and added 15 points" : $"caught {stats.Receptions} of {stats.Targets} targets, so no bonus applied";
                 return true;
             default:
                 return false;

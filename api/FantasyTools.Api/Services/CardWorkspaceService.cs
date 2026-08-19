@@ -26,7 +26,97 @@ public class CardWorkspaceService(IFileService fileService) : ICardWorkspaceServ
             workspace.At = DateTime.UtcNow;
             await fileService.Upsert(workspace);
         }
+        if (!workspace.Audit.Any(item => item.Action == "applied_sheet_rules_v3"))
+        {
+            ApplySheetRulesV3(workspace, userId);
+            workspace.At = DateTime.UtcNow;
+            await fileService.Upsert(workspace);
+        }
         return workspace;
+    }
+
+    private static void ApplySheetRulesV3(CardWorkspaceDocument workspace, string userId)
+    {
+        var now = DateTime.UtcNow;
+        var renames = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Two Deep"]="Edge Rush", ["No Fly Zone"]="Swim Move",
+            ["Air Traffic Control"]="Bull Rush", ["Denial"]="No Fly Zone"
+        };
+        foreach (var card in workspace.Cards)
+            if (renames.TryGetValue(card.Name, out var renamed)) card.Name = renamed;
+        var attackNames = new HashSet<string>(["Edge Rush","Swim Move","Bull Rush","Iron Curtain","Stacked Box","Stuffed","Lockdown","Double Teamed","No Fly Zone","Shutdown","Pressure","The Mike"], StringComparer.OrdinalIgnoreCase);
+        foreach (var card in workspace.Cards.Where(x=>attackNames.Contains(x.Name)))
+        {
+            card.Category="ATTACK"; card.EffectType="Percentage reduction";
+            card.OfficialDescription=$"Reduce your opponent's starting {card.Target} points by {Math.Abs(card.Amount):0.##}%.";
+        }
+
+        var rules = new (string Name,string Category,string Target,decimal Amount,int Copies,string Description)[]
+        {
+            ("Rough Start","UNIQUE","Opponent starter",-20,2,"The selected opponent starter begins at minus 20, then adds their normal weekly score."),
+            ("Butt Fumble","UNIQUE","Your starters",10,2,"Add 10 points for every fumble by a player in your starting lineup, whether or not it is lost."),
+            ("2025 Derrick Henry","UNIQUE","Opponent starters",-10,2,"Subtract 10 points for every fumble by a player in your opponent's starting lineup."),
+            ("28-3","UNIQUE","Your team",51,2,"If you trail by at least 50 immediately before the first Monday game, add exactly 51 points."),
+            ("Medical Tent","UNIQUE","Your starters",50,2,"Add 50 points once when a starter scores fewer than 5 points and Sleeper lists them Out or IR by Tuesday morning."),
+            ("Shoestring Tackle","BOOST","Your DEF",50,2,"Increase your starting defense's final score by 50%."),
+            ("Big Sack","UNIQUE","Your DEF",5,2,"Make every sack by your starting defense worth 5 total points."),
+            ("Interception","UNIQUE","Your DEF",15,2,"Make every interception by your starting defense worth 15 total points."),
+            ("Aaaaaand Nobody's Blocking","UNIQUE","Your QB",5,2,"Add 5 points every time your starting quarterback is sacked."),
+            ("Immaculate Reception","UNIQUE","Your RB/WR/TE",15,2,"If the chosen player catches every target with at least 3 targets, add 15 points."),
+            ("Challenge Flag","UNIQUE","Opponent card",0,1,"After Wednesday's reveal, cancel one player-played opponent card before Thursday kickoff. Weekly Cards are immune."),
+            ("MVP","UNIQUE","Your starter",0,2,"Replace your lowest-scoring starter at the same position with the highest-scoring player from the league's starting lineups. Ties are resolved randomly."),
+            ("Spygate","UNIQUE","Opponent starter",0,2,"Replace an opponent starter with a healthy, same-slot-eligible player from that opponent's bench."),
+            ("Traded WR","UNIQUE","Weekly opponent WR",0,2,"Replace an eligible player in your lineup with a WR from your weekly opponent."),
+            ("Traded RB","UNIQUE","Weekly opponent RB",0,2,"Replace an eligible player in your lineup with an RB from your weekly opponent."),
+            ("Traded TE","UNIQUE","Weekly opponent TE",0,2,"Replace an eligible player in your lineup with a TE from your weekly opponent."),
+            ("1v1 me bro","UNIQUE","Any starting position",0,2,"Challenge matching starters at any position. The winner receives both scores; the card owner wins a tie."),
+            ("Complete","UNIQUE","Your QB",2,2,"Add 2 extra points for every completion by your starting quarterback."),
+            ("Incomplete","UNIQUE","Your QB",3,2,"Add 3 extra points for every incompletion by your starting quarterback."),
+        };
+        foreach (var rule in rules)
+        {
+            var card = workspace.Cards.FirstOrDefault(x => x.Name.Equals(rule.Name, StringComparison.OrdinalIgnoreCase));
+            if (card is null && rule.Name == "Medical Tent") card = workspace.Cards.FirstOrDefault(x => x.Name.Equals("Injured", StringComparison.OrdinalIgnoreCase));
+            if (card is null)
+            {
+                card = new CardDraftDocument { Id=Guid.NewGuid().ToString(), Name=rule.Name, Rarity="Specialty", IsSpecial=true, ArtworkUrl="", Status="IDEA", CreatedByUserId=userId, CreatedAt=now };
+                workspace.Cards.Add(card);
+            }
+            card.Name=rule.Name; card.Category=rule.Category; card.Target=rule.Target; card.Amount=rule.Amount;
+            card.Copies=rule.Copies; card.OfficialDescription=rule.Description; card.EffectType=rule.Category=="BOOST"?"Percentage boost":"Specialty rule";
+            card.UpdatedByUserId=userId; card.UpdatedByName="Card Data + Rules sheet migration"; card.UpdatedAt=now;
+        }
+
+        var weekly = new (int Week,string Name,string Target,string Description)[]
+        {
+            (1,"Quantity > Quality","QB/RB/WR/TE","No yardage points. Only completions, receptions, touchdowns, and existing long-play bonuses score."),
+            (2,"Quality > Quantity","QB/RB/WR/TE","Only yardage and existing long-play bonuses score."),
+            (3,"Half Point","Entire league","Every reception is worth 0.5 points."),
+            (4,"Mini Battle","Entire league","Choose one QB, RB, WR, and TE from your Sleeper starters. Missed choices use the highest projected eligible starter."),
+            (5,"Deck Swap","Entire league","Opponents exchange starting-lineup scores. Invalid starters are replaced by the lowest projected eligible active bench player."),
+            (6,"TE Frenzy","Starting TE","TE receptions are worth 3 points, rushing/receiving yards 0.5 each, and touchdowns 10 points."),
+            (7,"Das Boot","Starting K","Field goals earn one point per kick yard. Extra points and all other kicker scoring remain unchanged."),
+            (8,"WR Frenzy","Flex slots","Flex slots use WRs; invalid slots use the highest projected eligible bench WR. WR yards are 0.5 and touchdowns 10."),
+            (9,"Cap Hit","Entire league","After every other effect, cap each starter's final score at 15 points."),
+            (10,"RB Frenzy","Flex slots","Flex slots use RBs; invalid slots use the highest projected eligible bench RB. RB yards are 0.5 and touchdowns 10."),
+            (11,"QB Frenzy","Normal QB slot","Completions +3, incompletions +1, touchdowns +10, passing/rushing yards +0.5, interceptions +15, and fumbles +25."),
+            (12,"DEF Frenzy","Starting DEF","Sacks, interceptions, and recovered fumbles are each worth 10 points."),
+            (13,"PPR Frenzy","RB/WR/TE","Each reception earns bonus points equal to the yards gained on all receptions; normal receiving-yard points remain."),
+            (14,"Chaos","Entire league","Play zero through all eight cards with no count, category, or duplicate restrictions."),
+            (15,"Double TD","Entire league","All touchdown points, including passing touchdowns, are doubled. Yardage is unchanged."),
+            (16,"Deep End","Entire league","Every bench player's score is added to the team score."),
+            (17,"PPY","QB/RB/WR/TE","Passing, rushing, and receiving yards are worth one point each. Kicker scoring is unchanged.")
+        };
+        foreach (var item in weekly)
+        {
+            var card=workspace.WeeklyCards.FirstOrDefault(x=>x.Week==item.Week);
+            if(card is null){card=new WeeklyCardDocument{Id=Guid.NewGuid().ToString("N"),Week=item.Week,ArtworkUrl=""};workspace.WeeklyCards.Add(card);}
+            card.Name=item.Name;card.Target=item.Target;card.Description=item.Description;card.RuleType=$"Weekly:{item.Name}";card.Amount=0;card.Active=true;
+            card.UpdatedByUserId=userId;card.UpdatedByName="Weekly Card Schedule migration";card.UpdatedAt=now;
+        }
+        workspace.WeeklyCards=workspace.WeeklyCards.OrderBy(x=>x.Week).ToList();
+        workspace.Audit.Insert(0,new CardAuditDocument{CardId="sheet-rules-v3",ActorUserId=userId,ActorName="Sheet rules migration",Action="applied_sheet_rules_v3",At=now});
     }
 
     private static void ApplyVerifiedRules(CardWorkspaceDocument workspace, string userId)
@@ -184,7 +274,7 @@ public class CardWorkspaceService(IFileService fileService) : ICardWorkspaceServ
     public Task<WeeklyCardDocument> SaveWeeklyCard(string leagueId, string userId, string userName, SaveWeeklyCardRequest request) =>
         Mutate(leagueId, userId, "edit_card_rules", workspace =>
         {
-            if (request.Week is < 1 or > 18) throw new ArgumentException("Week must be between 1 and 18.");
+            if (request.Week is < 1 or > 17) throw new ArgumentException("Week must be between 1 and 17.");
             if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Description))
                 throw new ArgumentException("Weekly Card name and full description are required.");
             if (!IsUploadedArtwork(request.ArtworkUrl)) throw new ArgumentException("Upload the Weekly Card artwork first.");
