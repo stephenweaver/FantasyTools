@@ -96,6 +96,39 @@ var immaculate = engine.Calculate(new TeamScoreInput(teamId, starters, new Dicti
 }) { PlayerStats = new Dictionary<string, PlayerWeekStats> { ["wr-1"] = new(Receptions: 4, Targets: 4) } });
 AssertEqual(75m, immaculate.ChaosScore, "immaculate reception perfect target bonus");
 
+var richStats=new Dictionary<string,PlayerWeekStats>
+{
+    ["qb-1"]=new(Completions:20,PassingAttempts:30,PassingInterceptions:1,Fumbles:1,PassingYards:250,RushingYards:20,PassingYardPoints:10,RushingYardPoints:2,PassingTouchdowns:2,TouchdownPoints:8),
+    ["rb-1"]=new(Receptions:4,Targets:5,RushingYards:80,ReceivingYards:30,RushingYardPoints:8,ReceivingYardPoints:3,ReceptionPoints:2,RushingTouchdowns:1,TouchdownPoints:6),
+    ["wr-1"]=new(Receptions:5,Targets:5,ReceivingYards:100,ReceivingYardPoints:10,ReceptionPoints:2.5m,ReceivingTouchdowns:1,TouchdownPoints:6)
+};
+TeamScoreInput WeeklyInput(string name)=>new(teamId,starters,new Dictionary<string,decimal>(),new[]{new ActiveEffect(Guid.NewGuid(),name,CardCategory.Unique,EffectType.Custom,new(TargetType.Team,teamId,null,null,null,null),0m,CustomHandler:$"weekly-{name}")})
+{
+    PlayerStats=richStats,Bench=[new SlotScore("BENCH-WR1","bench-1","Bench WR","WR",7m)],OpponentStarters=starters,OpponentBench=[],Projections=new Dictionary<string,decimal>{{"qb-1",20},{"rb-1",15},{"wr-1",12}}
+};
+foreach(var weeklyName in new[]{"Quantity > Quality","Quality > Quantity","Half Point","Mini Battle","Deck Swap","TE Frenzy","Das Boot","WR Frenzy","Cap Hit","RB Frenzy","QB Frenzy","DEF Frenzy","PPR Frenzy","Chaos","Double TD","Deep End","PPY"})
+{
+    var weeklyResult=engine.Calculate(WeeklyInput(weeklyName));
+    AssertTrue(!weeklyResult.Lines.Any(x=>x.Kind=="custom-pending"),$"weekly handler {weeklyName}");
+}
+var capAfterBoost=engine.Calculate(new(teamId,starters,new Dictionary<string,decimal>(),new ActiveEffect[]{Percentage("QB boost",100m,CardCategory.Boost,qbTarget),new(Guid.NewGuid(),"Cap Hit",CardCategory.Unique,EffectType.Custom,new(TargetType.Team,teamId,null,null,null,null),15m,CustomHandler:"cap-hit")}));
+AssertEqual(40m,capAfterBoost.ChaosScore,"cap applies after percentage cards");
+
+var halfPointThenBoost=WeeklyInput("Half Point") with
+{
+    Effects=[..WeeklyInput("Half Point").Effects,Percentage("WR boost",100m,CardCategory.Boost,receiverTarget)]
+};
+AssertEqual(70m,engine.Calculate(halfPointThenBoost).ChaosScore,"weekly reception scoring precedes personal boost");
+
+var cancelledAttackId=Guid.NewGuid();
+var weeklySurvivesChallenge=WeeklyInput("Quantity > Quality") with
+{
+    Effects=[..WeeklyInput("Quantity > Quality").Effects,
+        new(cancelledAttackId,"Two Deep",CardCategory.Attack,EffectType.Percentage,qbTarget,-25m),
+        new(Guid.NewGuid(),"Challenge Flag",CardCategory.Defense,EffectType.Custom,new(TargetType.Dynamic,teamId,null,null,null,$"cancel:{cancelledAttackId}"),0m,CustomHandler:"challenge-flag")]
+};
+AssertEqual(engine.Calculate(WeeklyInput("Quantity > Quality")).ChaosScore,engine.Calculate(weeklySurvivesChallenge).ChaosScore,"challenge flag never cancels league weekly rule");
+
 var rules = new CardPlayRules();
 var request = new PlayRequest(weekId, matchupId, teamId, opponentId, cardCopyId, CardCategory.Boost, CardTiming.PreWeek, qbTarget, DateTimeOffset.UtcNow);
 var validState = new WeekPlayState(WeekStatus.SelectionOpen, DateTimeOffset.UtcNow.AddHours(1), 0, [], true, CardCopyState.Hand, true, true);

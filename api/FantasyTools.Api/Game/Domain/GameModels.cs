@@ -85,6 +85,12 @@ public sealed record PlayerWeekStats(
     decimal PassingTouchdownPoints = 0m,
     decimal DefensiveSackPoints = 0m,
     decimal DefensiveInterceptionPoints = 0m,
+    decimal PassingTouchdowns = 0m,
+    decimal RushingTouchdowns = 0m,
+    decimal ReceivingTouchdowns = 0m,
+    decimal FieldGoalYards = 0m,
+    decimal FieldGoalPoints = 0m,
+    decimal BonusPoints = 0m,
     bool LeftGameInjuredAndDidNotReturn = false,
     string InjuryStatus = "");
 
@@ -111,6 +117,10 @@ public sealed record TeamScoreInput(
     public decimal? ScoreEnteringMonday { get; init; }
     public decimal? OpponentScoreEnteringMonday { get; init; }
     public decimal? LeagueHighestPlayerScore { get; init; }
+    public IReadOnlyList<SlotScore> Bench { get; init; } = [];
+    public IReadOnlyList<SlotScore> OpponentStarters { get; init; } = [];
+    public IReadOnlyList<SlotScore> OpponentBench { get; init; } = [];
+    public IReadOnlyDictionary<string, decimal> Projections { get; init; } = new Dictionary<string, decimal>();
 }
 
 public sealed record CalculationLine(

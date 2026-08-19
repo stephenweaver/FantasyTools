@@ -45,9 +45,17 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
                 before, change, running, effect.CardPlayId));
         }
 
+        foreach (var effect in Ordered(activeEffects.Where(e => e.Type == EffectType.Custom && IsWeeklyHandler(NormalizeHandler(e.CustomHandler ?? e.CardName)))))
+        {
+            var before=running;
+            var change=ApplyWeeklyRule(NormalizeHandler(effect.CustomHandler ?? effect.CardName),input,effectiveSlotScores,out var description);
+            running+=change;
+            lines.Add(new(2,"weekly",$"{effect.CardName}: {description}",before,change,running,effect.CardPlayId));
+        }
+
         // Stage 2: specialty rules that change a starter's effective contribution.
         // These run before percentage cards so later boosts/attacks use the resolved score.
-        foreach (var effect in Ordered(activeEffects.Where(e => e.Type == EffectType.Custom)))
+        foreach (var effect in Ordered(activeEffects.Where(e => e.Type == EffectType.Custom && !IsWeeklyHandler(NormalizeHandler(e.CustomHandler ?? e.CardName)) && NormalizeHandler(e.CustomHandler ?? e.CardName) is not "caphit" and not "bighit")))
         {
             var handler = NormalizeHandler(effect.CustomHandler ?? effect.CardName);
             var slot = ResolveTargetSlot(effect.Target, input.Starters);
@@ -96,6 +104,7 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
                 var before = running;
                 var change = targetBase * netPercentage / 100m;
                 running += change;
+                ApplyPercentageToSlots(target,input.Starters,effectiveSlotScores,netPercentage);
                 lines.Add(new(5, "percentage", $"{DescribeTarget(target)}: additive modifier {netPercentage:+0.##;-0.##}% of {targetBase:0.##}", before, change, running));
             }
         }
@@ -108,7 +117,83 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
             lines.Add(new(6, "flat", effect.CardName, before, effect.Amount, running, effect.CardPlayId));
         }
 
+        foreach(var effect in Ordered(activeEffects.Where(e=>e.Type==EffectType.Custom&&NormalizeHandler(e.CustomHandler??e.CardName) is "bighit")))
+        {
+            var slot=ResolveTargetSlot(effect.Target,input.Starters);if(slot is null)continue;var current=effectiveSlotScores.GetValueOrDefault(slot.Slot,slot.RawPoints);var change=Math.Min(current,10m)-current;var before=running;running+=change;effectiveSlotScores[slot.Slot]=Math.Min(current,10m);lines.Add(new(7,"final-cap",$"{effect.CardName}: capped {slot.PlayerName} at 10 points after all other effects",before,change,running,effect.CardPlayId));
+        }
+        foreach(var effect in Ordered(activeEffects.Where(e=>e.Type==EffectType.Custom&&NormalizeHandler(e.CustomHandler??e.CardName) is "caphit" or "weeklycaphit")))
+        {
+            var before=running;
+            var change=input.Starters.Sum(s=>Math.Min(effectiveSlotScores.GetValueOrDefault(s.Slot,s.RawPoints),15m)-effectiveSlotScores.GetValueOrDefault(s.Slot,s.RawPoints));
+            running+=change;
+            lines.Add(new(7,"final-cap",$"{effect.CardName}: capped every starter at 15 points after all other effects",before,change,running,effect.CardPlayId));
+        }
+
         return new(sleeperScore, decimal.Round(running, 2, MidpointRounding.AwayFromZero), lines);
+    }
+
+    private static bool IsWeeklyHandler(string handler)=>handler.StartsWith("weekly",StringComparison.Ordinal);
+
+    private static void ApplyPercentageToSlots(CardTarget target,IReadOnlyList<SlotScore> starters,Dictionary<string,decimal> effective,decimal percentage)
+    {
+        IEnumerable<SlotScore> slots=target.Type switch
+        {
+            TargetType.Team=>starters,
+            TargetType.StartingSlot=>starters.Where(x=>x.Slot.Equals(target.StartingSlot,StringComparison.OrdinalIgnoreCase)),
+            TargetType.PositionGroup=>starters.Where(x=>x.Position.Equals(target.Position,StringComparison.OrdinalIgnoreCase)),
+            TargetType.SpecificPlayer=>starters.Where(x=>x.PlayerId==target.NflPlayerId),
+            _=>[]
+        };
+        foreach(var slot in slots)effective[slot.Slot]=effective.GetValueOrDefault(slot.Slot,slot.RawPoints)*(1m+percentage/100m);
+    }
+
+    private static decimal ApplyWeeklyRule(string handler,TeamScoreInput input,Dictionary<string,decimal> effective,out string description)
+    {
+        decimal total=0m;
+        void Replace(SlotScore slot,decimal next){var current=effective.GetValueOrDefault(slot.Slot,slot.RawPoints);total+=next-current;effective[slot.Slot]=next;}
+        PlayerWeekStats Stats(SlotScore slot)=>input.PlayerStats.GetValueOrDefault(slot.PlayerId)??new();
+        decimal Frenzy(SlotScore slot,string position)
+        {
+            var s=Stats(slot);return position switch
+            {
+                "TE"=>s.Receptions*3m+(s.RushingYards+s.ReceivingYards)*.5m+(s.RushingTouchdowns+s.ReceivingTouchdowns)*10m,
+                "WR" or "RB"=>(s.RushingYards+s.ReceivingYards)*.5m+(s.RushingTouchdowns+s.ReceivingTouchdowns)*10m,
+                _=>slot.RawPoints
+            };
+        }
+        switch(handler)
+        {
+            case "weeklyquantityquality": foreach(var slot in input.Starters){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)-s.PassingYardPoints-s.RushingYardPoints-s.ReceivingYardPoints);}description="removed normal passing, rushing, and receiving yardage points";break;
+            case "weeklyqualityquantity": foreach(var slot in input.Starters){var s=Stats(slot);Replace(slot,s.PassingYardPoints+s.RushingYardPoints+s.ReceivingYardPoints+s.BonusPoints);}description="counted only normal yardage scoring and existing scoring bonuses";break;
+            case "weeklyhalfpoint": foreach(var slot in input.Starters){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)+s.Receptions*.5m-s.ReceptionPoints);}description="made every reception worth 0.5 points";break;
+            case "weeklyminibattle":
+                var chosen=new HashSet<string>(StringComparer.Ordinal);foreach(var pos in new[]{"QB","RB","WR","TE"}){var pick=input.Starters.Where(x=>x.Position==pos).OrderByDescending(x=>input.Projections.GetValueOrDefault(x.PlayerId)).ThenBy(x=>x.PlayerId).FirstOrDefault();if(pick is not null)chosen.Add(pick.PlayerId);}foreach(var slot in input.Starters.Where(x=>!chosen.Contains(x.PlayerId)))Replace(slot,0m);description="counted one projected-best starting QB, RB, WR, and TE";break;
+            case "weeklydeckswap":
+                foreach(var slot in input.Starters){var replacement=input.OpponentStarters.FirstOrDefault(x=>x.Slot.Equals(slot.Slot,StringComparison.OrdinalIgnoreCase));if(replacement is null)replacement=input.OpponentBench.Where(x=>x.Position==slot.Position).OrderBy(x=>input.Projections.GetValueOrDefault(x.PlayerId)).ThenBy(x=>x.PlayerId).FirstOrDefault();Replace(slot,replacement?.RawPoints??0m);}description="exchanged lineup-slot scores with the weekly opponent";break;
+            case "weeklytefrenzy": foreach(var slot in input.Starters.Where(x=>x.Position=="TE"))Replace(slot,Frenzy(slot,"TE"));description="applied TE Frenzy scoring";break;
+            case "weeklydasboot": foreach(var slot in input.Starters.Where(x=>x.Position=="K")){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)-s.FieldGoalPoints+s.FieldGoalYards);}description="made made field goals worth one point per kick yard";break;
+            case "weeklywrfrenzy": ApplyFlex("WR");description="filled flex slots with WRs and applied WR Frenzy scoring";break;
+            case "weeklyrbfrenzy": ApplyFlex("RB");description="filled flex slots with RBs and applied RB Frenzy scoring";break;
+            case "weeklyqbfrenzy": foreach(var slot in input.Starters.Where(x=>x.Position=="QB")){var s=Stats(slot);var incompletions=Math.Max(0,s.PassingAttempts-s.Completions);Replace(slot,s.Completions*3m+incompletions+(s.PassingTouchdowns+s.RushingTouchdowns)*10m+(s.PassingYards+s.RushingYards)*.5m+s.PassingInterceptions*15m+s.Fumbles*25m);}description="applied QB Frenzy scoring to the normal QB slot";break;
+            case "weeklydeffrenzy": foreach(var slot in input.Starters.Where(x=>x.Position=="DEF")){var s=Stats(slot);Replace(slot,s.DefensiveSacks*10m+s.DefensiveInterceptions*10m+s.DefensiveFumbleRecoveries*10m);}description="made sacks, interceptions, and recovered fumbles worth 10 each";break;
+            case "weeklypprfrenzy": foreach(var slot in input.Starters.Where(x=>x.Position is "RB" or "WR" or "TE")){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)+s.Receptions*s.ReceivingYards);}description="added receiving-yard points once for every reception";break;
+            case "weeklydoubletd": foreach(var slot in input.Starters){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)+s.TouchdownPoints);}description="doubled all touchdown points";break;
+            case "weeklydeepend": total+=input.Bench.Sum(x=>x.RawPoints);description="added every bench player's score";break;
+            case "weeklyppy": foreach(var slot in input.Starters.Where(x=>x.Position is "QB" or "RB" or "WR" or "TE")){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)-s.PassingYardPoints-s.RushingYardPoints-s.ReceivingYardPoints+s.PassingYards+s.RushingYards+s.ReceivingYards);}description="made each passing, rushing, and receiving yard worth one point";break;
+            case "weeklychaos": description="removed weekly card-count and category restrictions";break;
+            case "weeklycaphit": description="scheduled the final 15-point starter cap";break;
+            default: description="has no executable handler";break;
+        }
+        return total;
+
+        void ApplyFlex(string position)
+        {
+            foreach(var slot in input.Starters.Where(x=>x.Slot.StartsWith("FLEX",StringComparison.OrdinalIgnoreCase)))
+            {
+                var chosen=slot.Position==position?slot:input.Bench.Where(x=>x.Position==position).OrderByDescending(x=>input.Projections.GetValueOrDefault(x.PlayerId)).ThenBy(x=>x.PlayerId).FirstOrDefault();
+                Replace(slot,chosen is null?0m:Frenzy(chosen,position));
+            }
+        }
     }
 
     private static bool TryResolveCustom(string handler, ActiveEffect effect, SlotScore? slot, PlayerWeekStats? stats,
@@ -170,7 +255,12 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
             description = $"replaced {slot.PlayerName}'s {existing:0.##} with the league-high score of {input.LeagueHighestPlayerScore:0.##}";
             return true;
         }
-        if (handler is "spygate" or "tradedwr" or "tradedrb" or "tradedte")
+        if (handler == "spygate")
+        {
+            if(slot is null)return false;var replacement=input.Bench.Where(x=>x.Position==slot.Position&&!string.Equals(input.PlayerStats.GetValueOrDefault(x.PlayerId)?.InjuryStatus,"Out",StringComparison.OrdinalIgnoreCase)&&!string.Equals(input.PlayerStats.GetValueOrDefault(x.PlayerId)?.InjuryStatus,"IR",StringComparison.OrdinalIgnoreCase)).OrderBy(x=>input.Projections.GetValueOrDefault(x.PlayerId)).ThenBy(x=>x.PlayerId).FirstOrDefault();
+            var existing=effectiveScores.GetValueOrDefault(slot.Slot,slot.RawPoints);change=(replacement?.RawPoints??0m)-existing;description=replacement is null?$"replaced {slot.PlayerName} with an empty slot because no eligible bench player existed":$"replaced {slot.PlayerName} with {replacement.PlayerName}'s {replacement.RawPoints:0.##}";return true;
+        }
+        if (handler is "tradedwr" or "tradedrb" or "tradedte")
         {
             if (slot is null || effect.ReferencedPlayerId is null || !input.ReferencedPlayerScores.TryGetValue(effect.ReferencedPlayerId, out var replacement)) return false;
             var existing = effectiveScores.GetValueOrDefault(slot.Slot, slot.RawPoints);
@@ -178,12 +268,13 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
             description = $"replaced {slot.PlayerName}'s {existing:0.##} with {replacement:0.##}";
             return true;
         }
-        if (handler == "1v1mebro")
+        if (handler is "1v1mebro" or "1v1owner" or "1v1opponent")
         {
             if (slot is null || effect.ReferencedPlayerId is null || !input.ReferencedPlayerScores.TryGetValue(effect.ReferencedPlayerId, out var opposing)) return false;
             var own = effectiveScores.GetValueOrDefault(slot.Slot, slot.RawPoints);
-            change = own >= opposing ? opposing : -own;
-            description = own >= opposing ? $"{slot.PlayerName} won {own:0.##} to {opposing:0.##} and claimed both scores" : $"{slot.PlayerName} lost {own:0.##} to {opposing:0.##}, so the opponent claimed both scores";
+            var wins=handler=="1v1opponent"?own>opposing:own>=opposing;
+            change = wins ? opposing : -own;
+            description = wins ? $"{slot.PlayerName} won {own:0.##} to {opposing:0.##} and claimed both scores" : $"{slot.PlayerName} lost {own:0.##} to {opposing:0.##}, so the opponent claimed both scores";
             return true;
         }
         if (handler == "picksix")

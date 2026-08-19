@@ -9,3 +9,4 @@ public class SaveSelectionRequest
 }
 
 public class SetWeekDeadlineRequest { public DateTime DeadlineUtc { get; set; } }
+public class SetChallengeTargetRequest { public string CancelledCopyId { get; set; } }
