@@ -87,7 +87,7 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
         if(ResolveExpiredChallenges(game,state,workspace,week)){game.At=DateTime.UtcNow;await files.Upsert(game);}
         var chaosScores=CalculateScores(game,state,workspace,week);
         object publicSelections=state.Status is "revealed" or "live" or "finalized" ? state.Teams.Select(x=>new {x.RosterId,x.Selections}).ToList() : Array.Empty<object>();
-        return new { state.Week,state.Status,state.DeadlineUtc,state.RevealedAtUtc,sleeperStatus=game.SleeperStatus,team=game.Teams.FirstOrDefault(x=>x.RosterId==roster),hand=own?.DrawnAtUtc is null?seasonHand.Cards:own.Hand,selections=own?.Selections??[],canDraw=state.Status=="selection_open"&&own?.DrawnAtUtc is null,cardsNeeded=Math.Max(0,8-seasonHand.Cards.Count),publicSelections,teams=game.Teams,matchups=game.Matchups.Where(x=>x.Week==week),chaosScores };
+        return new { state.Week,state.Status,state.DeadlineUtc,state.RevealedAtUtc,sleeperStatus=game.SleeperStatus,team=game.Teams.FirstOrDefault(x=>x.RosterId==roster),hand=own?.DrawnAtUtc is null?seasonHand.Cards:own.Hand,selections=own?.Selections??[],miniBattlePlayerIds=own?.MiniBattlePlayerIds??[],canDraw=state.Status=="selection_open"&&own?.DrawnAtUtc is null,cardsNeeded=Math.Max(0,8-seasonHand.Cards.Count),publicSelections,teams=game.Teams,matchups=game.Matchups.Where(x=>x.Week==week),chaosScores };
     }
 
     public async Task<object> Deal(string leagueId,string actorUserId,int week) => await Mutate(leagueId,async game =>
@@ -144,6 +144,16 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
         var opponent=OpponentRoster(game,week,roster);var legal=state.Teams.Single(x=>x.RosterId==opponent).Selections.Any(x=>x.CopyId==cancelledCopyId);if(!legal)throw new InvalidOperationException("Choose one revealed card played by your weekly opponent.");
         selection.CancelledCopyId=cancelledCopyId;return (object)new{saved=true,selection.CancelledCopyId};
     });
+    public async Task<object> SetMiniBattlePlayers(string leagueId,string userId,int week,IReadOnlyList<string> playerIds)=>await Mutate(leagueId,async game=>
+    {
+        var roster=await UserRoster(leagueId,userId);var state=Week(game,week);EnsureOpen(state);var workspace=await Workspace(leagueId);
+        if(!workspace.WeeklyCards.Any(x=>x.Week==week&&x.Active&&NormalizeName(x.Name)=="minibattle"))throw new InvalidOperationException("Mini Battle is not active this week.");
+        var team=game.Teams.Single(x=>x.RosterId==roster);var selected=playerIds.Distinct().ToList();
+        if(selected.Count!=4)throw new InvalidOperationException("Choose exactly one starting QB, RB, WR, and TE.");
+        var players=selected.Select(id=>team.Players.FirstOrDefault(x=>x.PlayerId==id&&x.Starter)??throw new InvalidOperationException("Every Mini Battle choice must be one of your Sleeper starters.")).ToList();
+        foreach(var position in new[]{"QB","RB","WR","TE"})if(players.Count(x=>x.Position==position)!=1)throw new InvalidOperationException($"Choose exactly one starting {position}.");
+        state.Teams.Single(x=>x.RosterId==roster).MiniBattlePlayerIds=selected;return (object)new{saved=true,playerIds=selected};
+    });
     public async Task<object> SetDeadline(string leagueId,string actorUserId,int week,DateTime deadlineUtc)=>await Mutate(leagueId,async game=>{await Commissioner(leagueId,actorUserId);var state=Week(game,week);state.DeadlineUtc=deadlineUtc.ToUniversalTime();return (object)new{state.Week,state.DeadlineUtc};});
     public async Task<object> Reveal(string leagueId,string actorUserId,int week)=>await Mutate(leagueId,async game=>{await Commissioner(leagueId,actorUserId);var state=Week(game,week);var chaosWeek=IsChaosWeek(await Workspace(leagueId),week);if(!chaosWeek&&state.Teams.Any(x=>!Complete(x.Selections)))throw new InvalidOperationException("Every team must have 1 Boost, 1 Attack, and 2 Unique cards selected.");LockProjections(game,state);state.Status="revealed";state.RevealedAtUtc=DateTime.UtcNow;return (object)new{revealed=true,state.RevealedAtUtc};});
 
@@ -191,20 +201,27 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
                     if(ownerPlayer is not null&&opponentPlayer is not null&&team.RosterId==teamWeek.RosterId)effects.Add(new ActiveEffect(EffectId(selection.CopyId,"1v1-owner"),card.Name,CardCategory.Unique,EffectType.Custom,new(TargetType.SpecificPlayer,TeamGuid(team.RosterId),ownerPlayer.StartingSlot,null,ownerPlayer.PlayerId,null),0m,opponentPlayer.PlayerId,CustomHandler:"1v1-owner"));
                     if(ownerPlayer is not null&&opponentPlayer is not null&&team.RosterId==duelOpponentRoster)effects.Add(new ActiveEffect(EffectId(selection.CopyId,"1v1-opponent"),card.Name,CardCategory.Unique,EffectType.Custom,new(TargetType.SpecificPlayer,TeamGuid(team.RosterId),opponentPlayer.StartingSlot,null,opponentPlayer.PlayerId,null),0m,ownerPlayer.PlayerId,CustomHandler:"1v1-opponent"));
                 }
+                else if(normalizedName=="mvp"&&team.RosterId==teamWeek.RosterId)
+                {
+                    var selected=team.Players.FirstOrDefault(x=>x.PlayerId==selection.TargetPlayerId&&x.Starter);var lowest=selected is null?null:team.Players.Where(x=>x.Starter&&x.Position==selected.Position).OrderBy(x=>x.Points).ThenBy(x=>x.PlayerId).FirstOrDefault();
+                    if(lowest is not null)effects.Add(new ActiveEffect(EffectId(selection.CopyId,"mvp"),card.Name,CardCategory.Unique,EffectType.Custom,new(TargetType.SpecificPlayer,TeamGuid(team.RosterId),lowest.StartingSlot,null,lowest.PlayerId,null),0m,CustomHandler:"mvp"));
+                }
                 else if(targetRoster==team.RosterId)effects.Add(ToEffect(card,selection,targetRoster));
             }
-            if(weekly is not null)effects.Add(ToWeeklyEffect(weekly,team.RosterId));
+            if(weekly is not null)effects.Add(ToWeeklyEffect(weekly,team.RosterId,state.Teams.First(x=>x.RosterId==team.RosterId).MiniBattlePlayerIds));
             var starters=Slots(team,true);var bench=Slots(team,false);
             var ownMatch=game.Matchups.FirstOrDefault(x=>x.Week==week&&x.RosterId==team.RosterId);
             var opponentRoster=ownMatch is null?0:game.Matchups.FirstOrDefault(x=>x.Week==week&&x.MatchupId==ownMatch.MatchupId&&x.RosterId!=team.RosterId)?.RosterId??0;
             var opponent=game.Teams.FirstOrDefault(x=>x.RosterId==opponentRoster);
             var stats=game.Teams.SelectMany(x=>x.Players).GroupBy(x=>x.PlayerId).ToDictionary(x=>x.Key,x=>ToWeekStats(x.Last().Stats,state.TuesdayInjuryStatuses.GetValueOrDefault(x.Key)));
             var projections=state.LockedProjections.Count>0?state.LockedProjections:game.Teams.SelectMany(x=>x.Players).GroupBy(x=>x.PlayerId).ToDictionary(x=>x.Key,x=>x.Last().Projection);
-            var highest=game.Teams.SelectMany(x=>x.Players.Where(p=>p.Starter)).Select(x=>x.Points).DefaultIfEmpty().Max();
+            var leagueStarters=game.Teams.SelectMany(x=>x.Players.Where(p=>p.Starter)).ToList();
+            var highest=leagueStarters.Select(x=>x.Points).DefaultIfEmpty().Max();
+            var highestByPosition=leagueStarters.GroupBy(x=>x.Position,StringComparer.OrdinalIgnoreCase).ToDictionary(x=>x.Key,x=>x.Max(p=>p.Points),StringComparer.OrdinalIgnoreCase);
             var result=scoring.Calculate(new TeamScoreInput(TeamGuid(team.RosterId),starters,playerScores,effects)
             {
                 PlayerStats=stats,Bench=bench,OpponentStarters=opponent is null?[]:Slots(opponent,true),OpponentBench=opponent is null?[]:Slots(opponent,false),Projections=projections,
-                LeagueHighestPlayerScore=highest,ScoreEnteringMonday=state.MondayScores.GetValueOrDefault(team.RosterId),OpponentScoreEnteringMonday=state.MondayScores.GetValueOrDefault(opponentRoster)
+                LeagueHighestPlayerScore=highest,LeagueHighestStarterScoreByPosition=highestByPosition,ScoreEnteringMonday=state.MondayScores.GetValueOrDefault(team.RosterId),OpponentScoreEnteringMonday=state.MondayScores.GetValueOrDefault(opponentRoster)
             });
             return (object)new {rosterId=team.RosterId,result.SleeperScore,result.ChaosScore,result.Lines};
         }).ToArray();
@@ -223,9 +240,10 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
         return new ActiveEffect(Guid.TryParse(selection.CopyId,out var id)?id:Guid.NewGuid(),card.Name,categoryOverride??category,type,target,amount,referenced,card.DestinationSlot,card.Multiplier,handlerOverride??card.Name);
     }
 
-    private static ActiveEffect ToWeeklyEffect(WeeklyCardDocument card,int rosterId)
+    private static ActiveEffect ToWeeklyEffect(WeeklyCardDocument card,int rosterId,IReadOnlyList<string> miniBattlePlayerIds)
     {
-        var target=new CardTarget(TargetType.Team,TeamGuid(rosterId),null,null,null,null);
+        var dynamicRule=NormalizeName(card.Name)=="minibattle"?string.Join(',',miniBattlePlayerIds):null;
+        var target=new CardTarget(TargetType.Team,TeamGuid(rosterId),null,null,null,dynamicRule);
         return new ActiveEffect(Guid.TryParse(card.Id,out var id)?id:Guid.NewGuid(),card.Name,CardCategory.Unique,EffectType.Custom,target,card.Amount,CustomHandler:$"weekly-{card.Name}");
     }
 

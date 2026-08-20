@@ -99,6 +99,7 @@
 @media(max-width:800px){.weekly-feature{grid-template-columns:1fr}.weekly-art{max-width:330px;margin:auto}.season-strip>div{grid-template-columns:repeat(3,1fr)}.weekly-hero{align-items:start;flex-direction:column}.weekly-nav-button{left:12px;right:12px;text-align:center}}
 
 .mobile-bottom-nav{display:none}.pick-slots{display:flex;gap:8px;margin:12px 0}.pick-slots span{flex:1;border:1px solid #39443b;background:#0b100c;color:#7d887f;padding:10px;text-align:center;font:800 8px Inter;letter-spacing:.08em}.pick-slots span.filled{border-color:var(--lime);background:#172311;color:var(--lime)}.no-targets{border:1px dashed #536054;color:#aab4ac;padding:20px;text-align:center;margin:15px 0;font-size:11px}
+.mini-battle-picker{max-width:1100px;margin:18px auto}.mini-battle-groups{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}.mini-battle-groups fieldset{min-width:0;border:1px solid #344137;padding:8px}.mini-battle-groups legend{color:var(--lime);font:900 14px 'Barlow Condensed';padding:0 7px}.mini-battle-groups button{display:block;width:100%;min-height:54px;border:1px solid #303a32;background:#0a0e0b;color:#fff;text-align:left;padding:10px;margin:6px 0;cursor:pointer}.mini-battle-groups button.selected{border-color:var(--lime);background:#182412}.mini-battle-groups button b,.mini-battle-groups button span{display:block}.mini-battle-groups button span{color:#7e8a80;font-size:8px;margin-top:4px}.mini-battle-picker>.primary{width:100%}
 @media(max-width:700px){
   html,body,#root,.app-shell{width:100%;max-width:100%;overflow-x:clip}.battle,.room{width:100%;max-width:100%;min-width:0}.battle>*{max-width:100%;min-width:0}
   .mobile-bottom-nav{display:grid;position:fixed;left:0;right:0;bottom:0;z-index:80;grid-template-columns:repeat(5,1fr);height:68px;padding:4px 4px calc(4px + env(safe-area-inset-bottom));background:#080b09f7;border-top:1px solid #39443b;box-shadow:0 -12px 30px #0009}
@@ -112,4 +113,5 @@
   .target-modal>button{min-height:60px;font-size:13px;grid-template-columns:52px 1fr 24px}.target-modal>button span{font-size:10px}.target-modal .cancel{min-height:52px}
   .inspect-modal{border-radius:16px 16px 0 0}.inspect-art{min-height:48dvh}.inspect-play,.keep-card{width:100%;min-height:56px;font-size:11px}.modal-close{width:48px;height:48px}
   .library-actions button,.draft-actions button,.roster-actions button,.home-panels>article>button{min-height:50px}
+  .mini-battle-groups{grid-template-columns:1fr 1fr}.mini-battle-groups button{min-height:64px}
 }

@@ -163,20 +163,21 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
         }
         switch(handler)
         {
-            case "weeklyquantityquality": foreach(var slot in input.Starters){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)-s.PassingYardPoints-s.RushingYardPoints-s.ReceivingYardPoints);}description="removed normal passing, rushing, and receiving yardage points";break;
-            case "weeklyqualityquantity": foreach(var slot in input.Starters){var s=Stats(slot);Replace(slot,s.PassingYardPoints+s.RushingYardPoints+s.ReceivingYardPoints+s.BonusPoints);}description="counted only normal yardage scoring and existing scoring bonuses";break;
+            case "weeklyqualityquantity": foreach(var slot in input.Starters.Where(x=>x.Position is "QB" or "RB" or "WR" or "TE")){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)-s.PassingYardPoints-s.RushingYardPoints-s.ReceivingYardPoints);}description="removed normal passing, rushing, and receiving yardage points from QB, RB, WR, and TE starters";break;
+            case "weeklyquantityquality": foreach(var slot in input.Starters.Where(x=>x.Position is "QB" or "RB" or "WR" or "TE")){var s=Stats(slot);Replace(slot,s.PassingYardPoints+s.RushingYardPoints+s.ReceivingYardPoints+s.BonusPoints);}description="counted only normal yardage scoring and existing scoring bonuses for QB, RB, WR, and TE starters";break;
             case "weeklyhalfpoint": foreach(var slot in input.Starters){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)+s.Receptions*.5m-s.ReceptionPoints);}description="made every reception worth 0.5 points";break;
             case "weeklyminibattle":
-                var chosen=new HashSet<string>(StringComparer.Ordinal);foreach(var pos in new[]{"QB","RB","WR","TE"}){var pick=input.Starters.Where(x=>x.Position==pos).OrderByDescending(x=>input.Projections.GetValueOrDefault(x.PlayerId)).ThenBy(x=>x.PlayerId).FirstOrDefault();if(pick is not null)chosen.Add(pick.PlayerId);}foreach(var slot in input.Starters.Where(x=>!chosen.Contains(x.PlayerId)))Replace(slot,0m);description="counted one projected-best starting QB, RB, WR, and TE";break;
+                var requested=(input.Effects.FirstOrDefault(x=>NormalizeHandler(x.CustomHandler??x.CardName)=="weeklyminibattle")?.Target.DynamicRule??"").Split(',',StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+                var chosen=new HashSet<string>(StringComparer.Ordinal);foreach(var pos in new[]{"QB","RB","WR","TE"}){var pick=input.Starters.Where(x=>x.Position==pos&&requested.Contains(x.PlayerId)).FirstOrDefault()??input.Starters.Where(x=>x.Position==pos).OrderByDescending(x=>input.Projections.GetValueOrDefault(x.PlayerId)).ThenBy(x=>x.PlayerId).FirstOrDefault();if(pick is not null)chosen.Add(pick.PlayerId);}foreach(var slot in input.Starters.Where(x=>!chosen.Contains(x.PlayerId)))Replace(slot,0m);description="counted the selected starting QB, RB, WR, and TE; missing choices used the highest projected eligible starter";break;
             case "weeklydeckswap":
                 foreach(var slot in input.Starters){var replacement=input.OpponentStarters.FirstOrDefault(x=>x.Slot.Equals(slot.Slot,StringComparison.OrdinalIgnoreCase));if(replacement is null)replacement=input.OpponentBench.Where(x=>x.Position==slot.Position).OrderBy(x=>input.Projections.GetValueOrDefault(x.PlayerId)).ThenBy(x=>x.PlayerId).FirstOrDefault();Replace(slot,replacement?.RawPoints??0m);}description="exchanged lineup-slot scores with the weekly opponent";break;
             case "weeklytefrenzy": foreach(var slot in input.Starters.Where(x=>x.Position=="TE"))Replace(slot,Frenzy(slot,"TE"));description="applied TE Frenzy scoring";break;
             case "weeklydasboot": foreach(var slot in input.Starters.Where(x=>x.Position=="K")){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)-s.FieldGoalPoints+s.FieldGoalYards);}description="made made field goals worth one point per kick yard";break;
-            case "weeklywrfrenzy": ApplyFlex("WR");description="filled flex slots with WRs and applied WR Frenzy scoring";break;
-            case "weeklyrbfrenzy": ApplyFlex("RB");description="filled flex slots with RBs and applied RB Frenzy scoring";break;
+            case "weeklywrfrenzy": ApplyFrenzy("WR");description="filled flex slots with WRs and applied WR Frenzy scoring to every starting WR";break;
+            case "weeklyrbfrenzy": ApplyFrenzy("RB");description="filled flex slots with RBs and applied RB Frenzy scoring to every starting RB";break;
             case "weeklyqbfrenzy": foreach(var slot in input.Starters.Where(x=>x.Position=="QB")){var s=Stats(slot);var incompletions=Math.Max(0,s.PassingAttempts-s.Completions);Replace(slot,s.Completions*3m+incompletions+(s.PassingTouchdowns+s.RushingTouchdowns)*10m+(s.PassingYards+s.RushingYards)*.5m+s.PassingInterceptions*15m+s.Fumbles*25m);}description="applied QB Frenzy scoring to the normal QB slot";break;
             case "weeklydeffrenzy": foreach(var slot in input.Starters.Where(x=>x.Position=="DEF")){var s=Stats(slot);Replace(slot,s.DefensiveSacks*10m+s.DefensiveInterceptions*10m+s.DefensiveFumbleRecoveries*10m);}description="made sacks, interceptions, and recovered fumbles worth 10 each";break;
-            case "weeklypprfrenzy": foreach(var slot in input.Starters.Where(x=>x.Position is "RB" or "WR" or "TE")){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)+s.Receptions*s.ReceivingYards);}description="added receiving-yard points once for every reception";break;
+            case "weeklypprfrenzy": foreach(var slot in input.Starters.Where(x=>x.Position is "RB" or "WR" or "TE")){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)+s.ReceivingYards);}description="added one bonus point for every receiving yard, so each catch is worth the yards gained on that catch";break;
             case "weeklydoubletd": foreach(var slot in input.Starters){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)+s.TouchdownPoints);}description="doubled all touchdown points";break;
             case "weeklydeepend": total+=input.Bench.Sum(x=>x.RawPoints);description="added every bench player's score";break;
             case "weeklyppy": foreach(var slot in input.Starters.Where(x=>x.Position is "QB" or "RB" or "WR" or "TE")){var s=Stats(slot);Replace(slot,effective.GetValueOrDefault(slot.Slot,slot.RawPoints)-s.PassingYardPoints-s.RushingYardPoints-s.ReceivingYardPoints+s.PassingYards+s.RushingYards+s.ReceivingYards);}description="made each passing, rushing, and receiving yard worth one point";break;
@@ -186,8 +187,9 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
         }
         return total;
 
-        void ApplyFlex(string position)
+        void ApplyFrenzy(string position)
         {
+            foreach(var slot in input.Starters.Where(x=>x.Position==position&&!x.Slot.StartsWith("FLEX",StringComparison.OrdinalIgnoreCase)))Replace(slot,Frenzy(slot,position));
             foreach(var slot in input.Starters.Where(x=>x.Slot.StartsWith("FLEX",StringComparison.OrdinalIgnoreCase)))
             {
                 var chosen=slot.Position==position?slot:input.Bench.Where(x=>x.Position==position).OrderByDescending(x=>input.Projections.GetValueOrDefault(x.PlayerId)).ThenBy(x=>x.PlayerId).FirstOrDefault();
@@ -249,11 +251,16 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
         }
         if (handler == "mvp")
         {
-            if (slot is null || input.LeagueHighestPlayerScore is null) return false;
-            var existing = effectiveScores.GetValueOrDefault(slot.Slot, slot.RawPoints);
-            change = input.LeagueHighestPlayerScore.Value - existing;
-            description = $"replaced {slot.PlayerName}'s {existing:0.##} with the league-high score of {input.LeagueHighestPlayerScore:0.##}";
+            if (slot is null || !input.LeagueHighestStarterScoreByPosition.TryGetValue(slot.Position,out var leagueHigh)) return false;
+            var lowest=input.Starters.Where(x=>x.Position==slot.Position).OrderBy(x=>effectiveScores.GetValueOrDefault(x.Slot,x.RawPoints)).ThenBy(x=>x.PlayerId).First();
+            var existing = effectiveScores.GetValueOrDefault(lowest.Slot, lowest.RawPoints);
+            change = leagueHigh - existing;
+            description = $"replaced the lowest-scoring starting {slot.Position}, {lowest.PlayerName} ({existing:0.##}), with the league-high starting {slot.Position} score of {leagueHigh:0.##}";
             return true;
+        }
+        if (handler == "offsides")
+        {
+            change=20m;description="started the card owner's team at 20 points";return true;
         }
         if (handler == "spygate")
         {
@@ -320,6 +327,10 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
             case "roughstart":
                 change = -20m;
                 description = $"started {slot.PlayerName} at minus 20 points";
+                return true;
+            case "tdsaboteur":
+                change = -stats.TouchdownPoints;
+                description = $"removed {stats.TouchdownPoints:0.##} touchdown points from {slot.PlayerName}";
                 return true;
             case "stickyhands":
                 change = stats.Receptions * 2m - stats.ReceptionPoints;

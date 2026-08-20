@@ -111,6 +111,7 @@ public class TeamWeekDocument
     public DateTime? DiscardedAtUtc { get; set; }
     public List<DealtCardDocument> Hand { get; set; } = [];
     public List<CardSelectionDocument> Selections { get; set; } = [];
+    public List<string> MiniBattlePlayerIds { get; set; } = [];
 }
 
 public class DealtCardDocument

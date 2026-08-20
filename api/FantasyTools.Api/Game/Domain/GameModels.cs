@@ -117,6 +117,8 @@ public sealed record TeamScoreInput(
     public decimal? ScoreEnteringMonday { get; init; }
     public decimal? OpponentScoreEnteringMonday { get; init; }
     public decimal? LeagueHighestPlayerScore { get; init; }
+    public IReadOnlyDictionary<string, decimal> LeagueHighestStarterScoreByPosition { get; init; } =
+        new Dictionary<string, decimal>();
     public IReadOnlyList<SlotScore> Bench { get; init; } = [];
     public IReadOnlyList<SlotScore> OpponentStarters { get; init; } = [];
     public IReadOnlyList<SlotScore> OpponentBench { get; init; } = [];

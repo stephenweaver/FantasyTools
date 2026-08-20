@@ -111,6 +111,17 @@ foreach(var weeklyName in new[]{"Quantity > Quality","Quality > Quantity","Half 
     var weeklyResult=engine.Calculate(WeeklyInput(weeklyName));
     AssertTrue(!weeklyResult.Lines.Any(x=>x.Kind=="custom-pending"),$"weekly handler {weeklyName}");
 }
+AssertEqual(190m,engine.Calculate(WeeklyInput("PPR Frenzy")).ChaosScore,"PPR Frenzy adds receiving yards once, not receptions times yards");
+AssertEqual(110m,engine.Calculate(WeeklyInput("WR Frenzy")).ChaosScore,"WR Frenzy applies special scoring to normal starting WRs");
+AssertEqual(105m,engine.Calculate(WeeklyInput("RB Frenzy")).ChaosScore,"RB Frenzy applies special scoring to normal starting RBs");
+var qualityOnlyInput=new TeamScoreInput(teamId,[new("QB","qb-1","QB","QB",30m),new("K","k-1","K","K",8m),new("DEF","def-1","DEF","DEF",9m)],new Dictionary<string,decimal>(),new[]{new ActiveEffect(Guid.NewGuid(),"Quantity > Quality",CardCategory.Unique,EffectType.Custom,new(TargetType.Team,teamId,null,null,null,null),0m,CustomHandler:"weekly-Quantity > Quality")}){PlayerStats=new Dictionary<string,PlayerWeekStats>{{"qb-1",richStats["qb-1"]}}};
+AssertEqual(29m,engine.Calculate(qualityOnlyInput).ChaosScore,"only-yardage week leaves kicker and defense scoring unchanged");
+var offsides=engine.Calculate(new TeamScoreInput(teamId,starters,new Dictionary<string,decimal>(),new[]{new ActiveEffect(Guid.NewGuid(),"Offsides",CardCategory.Unique,EffectType.Custom,new(TargetType.Team,teamId,null,null,null,null),20m,CustomHandler:"Offsides")}));
+AssertEqual(80m,offsides.ChaosScore,"Offsides starts the owner at twenty points");
+var touchdownSaboteur=engine.Calculate(new TeamScoreInput(teamId,starters,new Dictionary<string,decimal>(),new[]{new ActiveEffect(Guid.NewGuid(),"TD Saboteur",CardCategory.Unique,EffectType.Custom,receiverTarget,0m,CustomHandler:"TD Saboteur")}){PlayerStats=richStats});
+AssertEqual(54m,touchdownSaboteur.ChaosScore,"TD Saboteur removes chosen starter touchdown points");
+var mvp=engine.Calculate(new TeamScoreInput(teamId,starters,new Dictionary<string,decimal>(),new[]{new ActiveEffect(Guid.NewGuid(),"MVP",CardCategory.Unique,EffectType.Custom,receiverTarget,0m,CustomHandler:"MVP")}){LeagueHighestStarterScoreByPosition=new Dictionary<string,decimal>{{"WR",40m}}});
+AssertEqual(90m,mvp.ChaosScore,"MVP uses the league-high same-position starter score");
 var capAfterBoost=engine.Calculate(new(teamId,starters,new Dictionary<string,decimal>(),new ActiveEffect[]{Percentage("QB boost",100m,CardCategory.Boost,qbTarget),new(Guid.NewGuid(),"Cap Hit",CardCategory.Unique,EffectType.Custom,new(TargetType.Team,teamId,null,null,null,null),15m,CustomHandler:"cap-hit")}));
 AssertEqual(40m,capAfterBoost.ChaosScore,"cap applies after percentage cards");
 

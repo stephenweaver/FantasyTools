@@ -32,7 +32,47 @@ public class CardWorkspaceService(IFileService fileService) : ICardWorkspaceServ
             workspace.At = DateTime.UtcNow;
             await fileService.Upsert(workspace);
         }
+        if (!workspace.Audit.Any(item => item.Action == "applied_rule_corrections_v4"))
+        {
+            ApplyRuleCorrectionsV4(workspace, userId);
+            workspace.At = DateTime.UtcNow;
+            await fileService.Upsert(workspace);
+        }
         return workspace;
+    }
+
+    private static void ApplyRuleCorrectionsV4(CardWorkspaceDocument workspace,string userId)
+    {
+        var now=DateTime.UtcNow;
+        var rules=new (string Name,string Target,decimal Amount,int Copies,string Description)[]
+        {
+            ("Offsides","Your team",20,2,"Start the week with 20 points added to your Chaos score."),
+            ("TD Saboteur","Opponent starter",0,2,"Choose one opponent starter. All touchdown points scored by that player are worth zero."),
+            ("Medical Tent","Your starters",50,2,"Add 50 points once when a starter scores fewer than 5 points and Sleeper lists them Out or IR by Tuesday morning."),
+            ("MVP","Your starter",0,2,"Choose a position using one of your starters. Replace your lowest-scoring starter at that position with the league's highest-scoring starter at the same position."),
+            ("Traded WR","Weekly opponent WR",0,2,"Replace your lowest-projected starting WR with a WR from your weekly opponent."),
+            ("Traded RB","Weekly opponent RB",0,2,"Replace your lowest-projected starting RB with an RB from your weekly opponent."),
+            ("Traded TE","Weekly opponent TE",0,2,"Replace your lowest-projected starting TE with a TE from your weekly opponent.")
+        };
+        foreach(var rule in rules)
+        {
+            var card=workspace.Cards.FirstOrDefault(x=>x.Name.Equals(rule.Name,StringComparison.OrdinalIgnoreCase));
+            if(card is null){card=new CardDraftDocument{Id=Guid.NewGuid().ToString(),Name=rule.Name,Category="UNIQUE",Rarity="Specialty",IsSpecial=true,ArtworkUrl="",Status="IDEA",CreatedByUserId=userId,CreatedAt=now};workspace.Cards.Add(card);}
+            card.Category="UNIQUE";card.Target=rule.Target;card.Amount=rule.Amount;card.Copies=rule.Copies;card.OfficialDescription=rule.Description;card.EffectType="Specialty rule";card.UpdatedByUserId=userId;card.UpdatedByName="Rule corrections v4";card.UpdatedAt=now;
+        }
+        var weekly=new Dictionary<int,(string Name,string Target,string Description)>
+        {
+            [1]=("Quality > Quantity","QB/RB/WR/TE","No yardage points are awarded to QB, RB, WR, or TE starters. Completions, receptions, touchdowns, and existing long-play bonuses still score."),
+            [2]=("Quantity > Quality","QB/RB/WR/TE","QB, RB, WR, and TE starters score only yardage points and existing long-play bonuses. Kicker and defense scoring remain normal."),
+            [4]=("Mini Battle","Entire league","Choose one starting QB, RB, WR, and TE. Only those four players count. A missed choice uses the highest projected eligible starter."),
+            [8]=("WR Frenzy","WR and FLEX","Every starting WR uses 0.5 points per rushing/receiving yard and 10 points per touchdown. FLEX slots must contain a WR; an invalid FLEX uses the highest projected eligible bench WR."),
+            [10]=("RB Frenzy","RB and FLEX","Every starting RB uses 0.5 points per rushing/receiving yard and 10 points per touchdown. FLEX slots must contain an RB; an invalid FLEX uses the highest projected eligible bench RB."),
+            [12]=("DEF Frenzy","Starting DEF","Sacks, interceptions, and recovered fumbles are each worth 10 points."),
+            [13]=("PPR Frenzy","RB/WR/TE","Each reception earns bonus points equal to the yards gained on that catch. Normal receiving-yard points remain; a 50-yard catch is worth 55 points before other scoring."),
+            [17]=("PPY","QB/RB/WR/TE","Every passing, rushing, and receiving yard is worth one point for QB, RB, WR, and TE starters. Kicker and defense scoring remain normal.")
+        };
+        foreach(var pair in weekly){var card=workspace.WeeklyCards.FirstOrDefault(x=>x.Week==pair.Key);if(card is null){card=new WeeklyCardDocument{Id=Guid.NewGuid().ToString("N"),Week=pair.Key,ArtworkUrl=""};workspace.WeeklyCards.Add(card);}card.Name=pair.Value.Name;card.Target=pair.Value.Target;card.Description=pair.Value.Description;card.RuleType=$"Weekly:{pair.Value.Name}";card.Active=true;card.UpdatedByUserId=userId;card.UpdatedByName="Rule corrections v4";card.UpdatedAt=now;}
+        workspace.Audit.Insert(0,new CardAuditDocument{CardId="rule-corrections-v4",ActorUserId=userId,ActorName="Rule corrections v4",Action="applied_rule_corrections_v4",At=now});
     }
 
     private static void ApplySheetRulesV3(CardWorkspaceDocument workspace, string userId)
