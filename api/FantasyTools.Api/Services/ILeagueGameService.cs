@@ -7,6 +7,7 @@ public interface ILeagueGameService
 {
     Task<LeagueGameDocument> Sync(string leagueId, string actorUserId, int week);
     Task<object> GetWeek(string leagueId, string userId, int week);
+    Task<object> GetUsageReport(string leagueId, string userId);
     Task<object> Deal(string leagueId, string actorUserId, int week);
     Task<object> Draw(string leagueId, string userId, int week);
     Task<object> Select(string leagueId, string userId, int week, SaveSelectionRequest request);

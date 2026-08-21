@@ -11,6 +11,7 @@ public class LeagueGameController(ILeagueGameService service):ControllerBase
 {
     [HttpPost("sync/{week:int}")] public Task<ActionResult> Sync(string leagueId,int week)=>Run(()=>service.Sync(leagueId,UserId,week));
     [HttpGet("weeks/{week:int}")] public Task<ActionResult> Week(string leagueId,int week)=>Run(()=>service.GetWeek(leagueId,UserId,week));
+    [HttpGet("card-usage")] public Task<ActionResult> CardUsage(string leagueId)=>Run(()=>service.GetUsageReport(leagueId,UserId));
     [HttpPost("weeks/{week:int}/deal")] public Task<ActionResult> Deal(string leagueId,int week)=>Run(()=>service.Deal(leagueId,UserId,week));
     [HttpPost("weeks/{week:int}/draw")] public Task<ActionResult> Draw(string leagueId,int week)=>Run(()=>service.Draw(leagueId,UserId,week));
     [HttpPut("weeks/{week:int}/deadline")] public Task<ActionResult> Deadline(string leagueId,int week,[FromBody]SetWeekDeadlineRequest request)=>Run(()=>service.SetDeadline(leagueId,UserId,week,request.DeadlineUtc));

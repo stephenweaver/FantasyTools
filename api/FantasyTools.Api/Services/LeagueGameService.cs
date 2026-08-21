@@ -90,6 +90,25 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
         return new { state.Week,state.Status,state.DeadlineUtc,state.RevealedAtUtc,sleeperStatus=game.SleeperStatus,team=game.Teams.FirstOrDefault(x=>x.RosterId==roster),hand=own?.DrawnAtUtc is null?seasonHand.Cards:own.Hand,selections=own?.Selections??[],miniBattlePlayerIds=own?.MiniBattlePlayerIds??[],canDraw=state.Status=="selection_open"&&own?.DrawnAtUtc is null,cardsNeeded=Math.Max(0,8-seasonHand.Cards.Count),publicSelections,teams=game.Teams,matchups=game.Matchups.Where(x=>x.Week==week),chaosScores };
     }
 
+    public async Task<object> GetUsageReport(string leagueId,string userId)
+    {
+        var workspace=await Workspace(leagueId);
+        var isCommissioner=workspace.PrimaryCommissionerUserId==userId||workspace.Collaborators.Any(x=>x.UserId==userId&&x.Permissions.Count>0);
+        if(!isCommissioner)throw new UnauthorizedAccessException("Commissioner access is required.");
+        var game=await Load(leagueId);
+        var plays=(from week in game.Weeks
+                   from teamWeek in week.Teams
+                   from selection in teamWeek.Selections
+                   let card=workspace.Cards.FirstOrDefault(x=>x.Id==selection.CardId)
+                   let team=game.Teams.FirstOrDefault(x=>x.RosterId==teamWeek.RosterId)
+                   let targetRoster=int.TryParse(selection.TargetRosterId,out var parsed)?game.Teams.FirstOrDefault(x=>x.RosterId==parsed):null
+                   let targetPlayer=targetRoster?.Players.FirstOrDefault(x=>x.PlayerId==selection.TargetPlayerId)
+                   select new {week=week.Week,status=week.Status,selectedAtUtc=selection.SelectedAtUtc,rosterId=teamWeek.RosterId,manager=team?.ManagerName??$"Roster {teamWeek.RosterId}",teamName=team?.TeamName??"",cardId=selection.CardId,cardName=card?.Name??"Unknown card",category=selection.Category,targetTeam=targetRoster?.TeamName??targetRoster?.ManagerName??"",targetPlayer=targetPlayer?.Name??"",targetSlot=selection.TargetSlot??"",cancelledCopyId=selection.CancelledCopyId??""})
+                   .OrderByDescending(x=>x.week).ThenByDescending(x=>x.selectedAtUtc).ToList();
+        var summary=plays.GroupBy(x=>new{x.cardId,x.cardName,x.category}).Select(group=>new{group.Key.cardId,group.Key.cardName,group.Key.category,plays=group.Count(),managers=group.Select(x=>x.rosterId).Distinct().Count(),lastPlayedWeek=group.Max(x=>x.week)}).OrderByDescending(x=>x.plays).ThenBy(x=>x.cardName).ToList();
+        return new {totalPlays=plays.Count,uniqueCards=summary.Count,summary,plays};
+    }
+
     public async Task<object> Deal(string leagueId,string actorUserId,int week) => await Mutate(leagueId,async game =>
     {
         await Commissioner(leagueId,actorUserId);
@@ -290,8 +309,8 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
         if(targetText.Contains("team")||targetText.Contains("card"))return;
         var targetTeam=game.Teams.FirstOrDefault(x=>x.RosterId==requestedRoster)??throw new InvalidOperationException("The target roster is unavailable.");
         var player=targetTeam.Players.FirstOrDefault(x=>x.PlayerId==request.TargetPlayerId&&x.Starter)??throw new InvalidOperationException("Choose an eligible starting player.");
-        var required=new[]{"QB","RB","WR","TE","DEF","FLEX"}.FirstOrDefault(position=>targetText.Contains(position.ToLowerInvariant()));
-        if(required is not null&&player.Position!=required&&!(required=="FLEX"&&new[]{"RB","WR","TE"}.Contains(player.Position)))throw new InvalidOperationException($"This card requires a {required} target.");
+        var allowed=targetText.Contains("rb/wr/te")||targetText.Contains("w/r/t")?new[]{"RB","WR","TE"}:new[]{"QB","RB","WR","TE","DEF","FLEX"}.Where(position=>targetText.Contains(position.ToLowerInvariant())).ToArray();
+        if(allowed.Length>0&&!allowed.Contains(player.Position)&&!(allowed.Contains("FLEX")&&new[]{"RB","WR","TE"}.Contains(player.Position)))throw new InvalidOperationException($"This card requires a {string.Join('/',allowed)} target.");
     }
     private static void AutoFill(LeagueGameDocument game,WeeklyGameDocument weekState,TeamWeekDocument team,int week)
     {
@@ -299,8 +318,8 @@ public class LeagueGameService(IFileService files, HttpClient sleeper, IChaosSco
         foreach(var card in team.Hand.Where(x=>Normalize(x.Category)==requirement.Item1&&!team.Selections.Any(s=>s.CopyId==x.CopyId)).Take(Math.Max(0,requirement.Item2-team.Selections.Count(s=>Normalize(s.Category)==requirement.Item1))))
         {
             var targetText=(card.Target??"").ToLowerInvariant();var opponent=OpponentRoster(game,week,team.RosterId);var targetRoster=targetText.Contains("opponent")?opponent:team.RosterId;
-            var targetTeam=game.Teams.FirstOrDefault(x=>x.RosterId==targetRoster);var required=new[]{"QB","RB","WR","TE","DEF","FLEX"}.FirstOrDefault(p=>targetText.Contains(p.ToLowerInvariant()));
-            var eligible=targetTeam?.Players.Where(x=>x.Starter&&(required is null||x.Position==required||(required=="FLEX"&&new[]{"RB","WR","TE"}.Contains(x.Position)))).OrderByDescending(x=>x.Projection).ThenBy(x=>x.PlayerId).FirstOrDefault();
+            var targetTeam=game.Teams.FirstOrDefault(x=>x.RosterId==targetRoster);var allowed=targetText.Contains("rb/wr/te")||targetText.Contains("w/r/t")?new[]{"RB","WR","TE"}:new[]{"QB","RB","WR","TE","DEF","FLEX"}.Where(p=>targetText.Contains(p.ToLowerInvariant())).ToArray();
+            var eligible=targetTeam?.Players.Where(x=>x.Starter&&(allowed.Length==0||allowed.Contains(x.Position)||(allowed.Contains("FLEX")&&new[]{"RB","WR","TE"}.Contains(x.Position)))).OrderByDescending(x=>x.Projection).ThenBy(x=>x.PlayerId).FirstOrDefault();
             team.Selections.Add(new(){CopyId=card.CopyId,CardId=card.CardId,Category=requirement.Item1,TargetRosterId=targetRoster.ToString(),TargetPlayerId=targetText.Contains("team")||targetText.Contains("card")?"":eligible?.PlayerId??"",TargetSlot=eligible?.StartingSlot??"AUTO",SelectedAtUtc=DateTime.UtcNow});
         }
     }

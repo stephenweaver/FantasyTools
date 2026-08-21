@@ -296,6 +296,16 @@ public sealed class ChaosScoringEngine : IChaosScoringEngine
                 : $"awarded {quarterbackStats.PassingTouchdownPoints:0.##} passing-touchdown points to the starting defense";
             return true;
         }
+        if(handler=="bromance")
+        {
+            if(slot is null)return false;
+            var sourceId=effect.ReferencedPlayerId??"4046";
+            if(!input.ReferencedPlayerScores.TryGetValue(sourceId,out var sourceScore))return false;
+            var currentScore=effectiveScores.GetValueOrDefault(slot.Slot,slot.RawPoints);
+            change=sourceScore*2m-currentScore;
+            description=$"replaced {slot.PlayerName}'s {currentScore:0.##} with two times Patrick Mahomes's {sourceScore:0.##} points";
+            return true;
+        }
         if (slot is null || stats is null) return false;
         var current = effectiveScores.GetValueOrDefault(slot.Slot, slot.RawPoints);
         switch (handler)

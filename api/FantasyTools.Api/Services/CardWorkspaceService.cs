@@ -38,7 +38,46 @@ public class CardWorkspaceService(IFileService fileService) : ICardWorkspaceServ
             workspace.At = DateTime.UtcNow;
             await fileService.Upsert(workspace);
         }
+        if (!workspace.Audit.Any(item => item.Action == "removed_unique_cap_hit_v5"))
+        {
+            RemoveUniqueCapHit(workspace, userId);
+            workspace.At = DateTime.UtcNow;
+            await fileService.Upsert(workspace);
+        }
         return workspace;
+    }
+
+    private static void RemoveUniqueCapHit(CardWorkspaceDocument workspace,string userId)
+    {
+        workspace.Cards.RemoveAll(card=>card.Name.Equals("Cap Hit",StringComparison.OrdinalIgnoreCase));
+        var targets=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Pick Six"]="Opponent QB",["Complete"]="Your QB",["Incomplete"]="Your QB",["Bromance"]="Your QB",
+            ["FAFB"]="Your QB",["Aaaaaand Nobody's Blocking"]="Your QB",["Sacked"]="Opponent QB",
+            ["Double TD"]="Your starter",["Double or Nothing"]="Your RB/WR/TE",["Sticky Hands"]="Your RB/WR/TE",
+            ["Beast Mode"]="Your RB",["Big Sack"]="Your DEF",["Interception"]="Your DEF",
+            ["Medical Tent"]="Your team",["Butt Fumble"]="Your team",["2025 Derrick Henry"]="Opponent team",
+            ["28-3"]="Your team",["1v1 me bro"]="Your starter",["Immaculate Reception"]="Your RB/WR/TE"
+        };
+        foreach(var card in workspace.Cards.Where(card=>targets.ContainsKey(card.Name)))
+        {
+            card.Target=targets[card.Name];
+            if(card.Category.Equals("UNIQUE",StringComparison.OrdinalIgnoreCase)&&!card.EffectType.Contains("Referenced player",StringComparison.OrdinalIgnoreCase))card.EffectType="Specialty rule";
+            card.UpdatedByUserId=userId;card.UpdatedByName="Rule cleanup v5";card.UpdatedAt=DateTime.UtcNow;
+        }
+        var bromance=workspace.Cards.FirstOrDefault(card=>card.Name.Equals("Bromance",StringComparison.OrdinalIgnoreCase));
+        if(bromance is not null){bromance.SourcePlayer="Patrick Mahomes";bromance.SourcePlayerId="4046";bromance.Multiplier=2m;}
+        foreach(var card in workspace.Cards.Where(card=>card.Category.Equals("ATTACK",StringComparison.OrdinalIgnoreCase)))
+        {
+            if(!card.Target.Contains("opponent",StringComparison.OrdinalIgnoreCase))card.Target=$"Opponent {card.Target}";
+            card.EffectType="Percentage reduction";
+        }
+        foreach(var card in workspace.Cards.Where(card=>card.Category.Equals("BOOST",StringComparison.OrdinalIgnoreCase)))
+        {
+            if(!card.Target.Contains("your",StringComparison.OrdinalIgnoreCase))card.Target=$"Your {card.Target}";
+            card.EffectType="Percentage boost";
+        }
+        workspace.Audit.Insert(0,new CardAuditDocument{CardId="cap-hit",ActorUserId=userId,ActorName="Rule cleanup v5",Action="removed_unique_cap_hit_v5",At=DateTime.UtcNow});
     }
 
     private static void ApplyRuleCorrectionsV4(CardWorkspaceDocument workspace,string userId)

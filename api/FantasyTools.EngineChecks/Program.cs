@@ -120,6 +120,8 @@ var offsides=engine.Calculate(new TeamScoreInput(teamId,starters,new Dictionary<
 AssertEqual(80m,offsides.ChaosScore,"Offsides starts the owner at twenty points");
 var touchdownSaboteur=engine.Calculate(new TeamScoreInput(teamId,starters,new Dictionary<string,decimal>(),new[]{new ActiveEffect(Guid.NewGuid(),"TD Saboteur",CardCategory.Unique,EffectType.Custom,receiverTarget,0m,CustomHandler:"TD Saboteur")}){PlayerStats=richStats});
 AssertEqual(54m,touchdownSaboteur.ChaosScore,"TD Saboteur removes chosen starter touchdown points");
+var bromanceCustom=engine.Calculate(new TeamScoreInput(teamId,starters,new Dictionary<string,decimal>{{"4046",25m}},new[]{new ActiveEffect(Guid.NewGuid(),"Bromance",CardCategory.Unique,EffectType.Custom,qbTarget,0m,"4046",CustomHandler:"Bromance")}));
+AssertEqual(80m,bromanceCustom.ChaosScore,"Bromance replaces the chosen QB with double Mahomes");
 var mvp=engine.Calculate(new TeamScoreInput(teamId,starters,new Dictionary<string,decimal>(),new[]{new ActiveEffect(Guid.NewGuid(),"MVP",CardCategory.Unique,EffectType.Custom,receiverTarget,0m,CustomHandler:"MVP")}){LeagueHighestStarterScoreByPosition=new Dictionary<string,decimal>{{"WR",40m}}});
 AssertEqual(90m,mvp.ChaosScore,"MVP uses the league-high same-position starter score");
 var capAfterBoost=engine.Calculate(new(teamId,starters,new Dictionary<string,decimal>(),new ActiveEffect[]{Percentage("QB boost",100m,CardCategory.Boost,qbTarget),new(Guid.NewGuid(),"Cap Hit",CardCategory.Unique,EffectType.Custom,new(TargetType.Team,teamId,null,null,null,null),15m,CustomHandler:"cap-hit")}));
